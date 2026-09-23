@@ -1,0 +1,10 @@
+#!/bin/sh
+case "$1" in
+    audio)
+        case "${2:-menu}" in
+            menu) exec "$HOME/.local/bin/desktop-panel" audio ;;
+        esac ;;
+    network|bluetooth|settings|power)
+        exec "$HOME/.local/bin/desktop-panel" "$1" ;;
+esac
+exec python3 "$HOME/.local/lib/rice/desktop.py" "$@"

@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Waybar actions for Code; paths are always passed as individual arguments."""
+import json
+import os
+from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+from urllib.parse import urlparse, unquote
+
+HOME = Path.home()
+CONFIG = Path(os.environ.get('XDG_CONFIG_HOME', HOME / '.config'))
+ACTIONS = ['Open / focus VS Code', 'Open folder…', 'Open workspace…',
+           'Recent projects…', 'Add folder to workspace…', 'New window',
+           'Edit desktop configs']
+
+
+def run(args, **kwargs):
+    return subprocess.run(args, text=True, capture_output=True, **kwargs)
+
+
+def notify(message):
+    run(['notify-send', 'VS Code', message])
+
+
+def launch(*args):
+    subprocess.Popen(['code', *args], stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def choose(labels, prompt):
+    result = run(['rofi', '-dmenu', '-i', '-no-custom', '-format', 'i', '-p', prompt, '-mesg', prompt,
+                  *(['-theme-str', 'mainbox { children: [message,listview]; }'] if prompt == 'VS Code' else [])],
+                 input='\n'.join(label.replace('\n', ' ') for label in labels) + '\n')
+    if result.returncode != 0:
+        return None
+    try:
+        index = int(result.stdout.strip())
+        return index if 0 <= index < len(labels) else None
+    except ValueError:
+        return None
+
+
+def pick(directory=False):
+    args = ['zenity', '--file-selection', '--filename=' + str(HOME) + '/',
+            '--title=' + ('Choose project folder' if directory else 'Choose VS Code workspace')]
+    if directory:
+        args.append('--directory')
+    else:
+        args.append('--file-filter=VS Code workspaces | *.code-workspace')
+    result = run(args)
+    if result.returncode != 0:
+        return None
+    path = Path(result.stdout.removesuffix('\n'))
+    valid = path.is_dir() if directory else path.is_file() and path.suffix == '.code-workspace'
+    if not valid:
+        notify('Choose an existing ' + ('folder.' if directory else '.code-workspace file.'))
+        return None
+    return str(path.resolve())
+
+
+def recent_projects():
+    projects, seen = [], set()
+    for edition in ['Code', 'Code - OSS', 'VSCodium', 'Code - Insiders']:
+        db = CONFIG / edition / 'User/globalStorage/state.vscdb'
+        if not db.is_file():
+            continue
+        try:
+            with sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=1) as conn:
+                row = conn.execute('SELECT value FROM ItemTable WHERE key=?',
+                                   ('history.recentlyOpenedPathsList',)).fetchone()
+            entries = json.loads(row[0]).get('entries', []) if row else []
+            for entry in entries:
+                uri = entry.get('folderUri') or entry.get('workspace', {}).get('configPath')
+                if not isinstance(uri, str):
+                    continue
+                parsed = urlparse(uri)
+                if parsed.scheme != 'file' or parsed.netloc not in ('', 'localhost'):
+                    continue
+                path = Path(unquote(parsed.path))
+                if path.exists() and str(path) not in seen:
+                    seen.add(str(path))
+                    projects.append(str(path))
+        except (OSError, sqlite3.Error, ValueError, TypeError, AttributeError):
+            continue
+    return projects
+
+
+def focus():
+    result = run(['hyprctl', '-j', 'clients'])
+    try:
+        clients = json.loads(result.stdout)
+    except ValueError:
+        clients = []
+    clients = [c for c in clients if c.get('class', '').lower() in
+               {'code', 'code-oss', 'code - oss', 'vscodium', 'code-insiders'}]
+    if clients:
+        client = min(clients, key=lambda c: c.get('focusHistoryID', 999))
+        run(['hyprctl', 'dispatch', 'hl.dsp.focus({window=' + json.dumps('address:' + client['address']) + '})'])
+    else:
+        launch()
+
+
+def main(action=None):
+    if action == 'folder':
+        action = ACTIONS[1]
+    elif action == 'focus':
+        action = ACTIONS[0]
+    elif action is None:
+        os.execv(str(HOME / '.local/bin/desktop-panel'), ['desktop-panel', 'code'])
+    elif action == 'legacy':
+        index = choose(ACTIONS, 'VS Code')
+        if index is None:
+            return
+        action = ACTIONS[index]
+    if action == ACTIONS[0]:
+        focus()
+    elif action in (ACTIONS[1], ACTIONS[2], ACTIONS[4]):
+        path = pick(directory=action != ACTIONS[2])
+        if path:
+            launch('--add' if action == ACTIONS[4] else '--new-window', path)
+    elif action == ACTIONS[3]:
+        paths = recent_projects()
+        if not paths:
+            notify('No recent local projects yet. Use Open folder or Open workspace first.')
+            return
+        index = choose(paths, 'Recent projects')
+        if index is not None:
+            launch('--new-window', paths[index])
+    elif action == ACTIONS[5]:
+        launch('--new-window')
+    elif action == ACTIONS[6]:
+        launch('--new-window', str(HOME / 'config'))
+
+
+if __name__ == '__main__':
+    try:
+        main(sys.argv[1] if len(sys.argv) > 1 else None)
+    except (OSError, subprocess.SubprocessError) as exc:
+        notify(str(exc))

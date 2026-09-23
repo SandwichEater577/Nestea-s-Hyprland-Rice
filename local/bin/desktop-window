@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+import json,subprocess,sys
+name=sys.argv[1]
+clients=json.loads(subprocess.check_output(['hyprctl','-j','clients'],text=True))
+windows=[c for c in clients if c.get('class','').lower()==name]
+if windows:
+    client=min(windows,key=lambda c:c.get('focusHistoryID',999))
+    subprocess.run(['hyprctl','dispatch','hl.dsp.focus({window='+json.dumps('address:'+client['address'])+'})'],check=True)
+elif name=='spotify':subprocess.Popen(['spotify-launcher'],start_new_session=True)

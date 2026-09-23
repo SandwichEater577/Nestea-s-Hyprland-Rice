@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""Emit a compact Spotify module; an empty label hides it when unavailable."""
+import hashlib
+import html
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from urllib.parse import urlparse, unquote
+from urllib.request import urlopen
+
+
+def cover():
+    if not player('status'):
+        return ''
+    url = player('metadata', 'mpris:artUrl')
+    parsed = urlparse(url)
+    if parsed.scheme == 'file':
+        path = Path(unquote(parsed.path))
+        return str(path) if path.is_file() else ''
+    if parsed.scheme not in ('https', 'http'):
+        return ''
+    cache = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'waybar-spotify'
+    cache.mkdir(parents=True, exist_ok=True)
+    path = cache / (hashlib.sha256(url.encode()).hexdigest() + '.art')
+    if not path.exists():
+        with urlopen(url, timeout=3) as response:
+            data = response.read(5 * 1024 * 1024 + 1)
+        if not data or len(data) > 5 * 1024 * 1024:
+            return ''
+        tmp = path.with_suffix('.tmp-' + str(os.getpid()))
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        # Keep a bounded album-art cache.
+        for old in sorted(cache.glob('*.art'), key=lambda p: p.stat().st_mtime, reverse=True)[100:]:
+            old.unlink(missing_ok=True)
+    return str(path)
+
+
+def player(*args):
+    result = subprocess.run(['playerctl', '--player=spotify', *args],
+                            capture_output=True, text=True, timeout=3)
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
+def main():
+    if '--cycle-repeat' in sys.argv or '--toggle-shuffle' in sys.argv:
+        try:
+            if not player('status'):
+                return
+            if '--cycle-repeat' in sys.argv:
+                state = player('loop')
+                target = {'None': 'Playlist', 'Playlist': 'Track', 'Track': 'None'}.get(state)
+                if target:
+                    player('loop', target)
+            else:
+                player('shuffle', 'Toggle')
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
+    if '--cover' in sys.argv:
+        try:
+            path = cover()
+            title = player('metadata', '--format', '{{artist}} — {{title}}') if path else ''
+            tooltip = html.escape(' '.join(title.split()) or 'Spotify') if path else ''
+            print(path + '\n' + tooltip)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            print('')
+        return
+    try:
+        status = player('status')
+        if not status:
+            print(json.dumps({'text': '', 'tooltip': ''}))
+            return
+        if '--shuffle' in sys.argv:
+            state = player('shuffle')
+            enabled = state == 'On'
+            print(json.dumps({
+                'text': '',
+                'class': 'enabled' if enabled else 'disabled',
+                'tooltip': ('Shuffle on (regular / Smart not exposed)' if enabled else 'Shuffle off')
+                    + '\nClick: toggle shuffle\nRight-click: choose Smart Shuffle in Spotify',
+            }))
+            return
+        if '--repeat' in sys.argv:
+            state = player('loop')
+            label = {'None': 'Repeat off', 'Playlist': 'Repeat all', 'Track': 'Repeat one'}.get(state, 'Repeat unavailable')
+            print(json.dumps({
+                'text': '󰑘' if state == 'Track' else '',
+                'class': 'enabled' if state in ('Playlist', 'Track') else 'disabled',
+                'tooltip': label + '\nClick: off → all → one',
+            }))
+            return
+        icon = '' if status == 'Playing' else ''
+        print(json.dumps({
+            'text': icon,
+            'class': status.lower(),
+            'tooltip': 'Play / pause',
+        }))
+    except (OSError, subprocess.SubprocessError):
+        print(json.dumps({'text': '', 'tooltip': ''}))
+
+
+if __name__ == '__main__':
+    main()

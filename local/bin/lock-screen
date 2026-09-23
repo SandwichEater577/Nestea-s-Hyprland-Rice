@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Use a delimiter-safe wallpaper path, or the configured solid background."""
+from pathlib import Path
+import os,subprocess
+h=Path.home()
+if subprocess.run(['pgrep','-u',str(os.getuid()),'-x','hyprlock'],stdout=subprocess.DEVNULL).returncode==0:
+    raise SystemExit(0)
+c=h/'.cache'; c.mkdir(exist_ok=True)
+config=(h/'.config/hypr/hyprlock.conf').read_text()
+s=c/'current-wallpaper'
+if s.exists():
+    image=Path(s.read_text().rstrip('\n'))
+    if image.is_file():
+        link=c/'hyprlock-wallpaper'
+        if link.is_symlink(): link.unlink()
+        if not link.exists():
+            link.symlink_to(image)
+            config=config.replace('    color = rgba(181818ff)',f'    path = {link}\n    blur_passes = 2\n    color = rgba(181818ff)')
+p=c/'hyprlock-current.conf'; p.write_text(config)
+os.execvp('hyprlock',['hyprlock','--config',str(p)])

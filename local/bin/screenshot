@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Capture privately, save a timestamped image, and copy it to the clipboard.
+set -euo pipefail
+umask 077
+mkdir -p "$HOME/Pictures/Screenshots"
+file=$(mktemp "$HOME/Pictures/Screenshots/$(date +%Y-%m-%d_%H-%M-%S)-XXXXXX.png")
+if [[ ${1:-full} == region ]]; then
+    region=$(slurp) || { rm -f -- "$file"; exit 0; }
+    [[ -n "$region" ]] || { rm -f -- "$file"; exit 0; }
+    grim -g "$region" "$file" || { rm -f -- "$file"; exit 1; }
+else
+    grim "$file" || { rm -f -- "$file"; exit 1; }
+fi
+wl-copy --type image/png < "$file"
+notify-send 'Screenshot saved and copied' "$file"

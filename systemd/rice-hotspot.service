@@ -1,0 +1,12 @@
+[Unit]
+Description=Prefer phone hotspot when it appears
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.local/lib/rice/hotspot.py
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

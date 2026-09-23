@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""Apply personal wallpapers through Hyprpaper 0.8 IPC; never modify originals."""
+from pathlib import Path
+import fcntl, hashlib, json, os, random, subprocess, sys, time
+home=Path.home()
+folder=home/'config/wallpaper'
+cache=Path(os.environ.get('XDG_CACHE_HOME',home/'.cache'))
+folder.mkdir(parents=True,exist_ok=True); cache.mkdir(parents=True,exist_ok=True)
+state=cache/'current-wallpaper'
+restore='--restore' in sys.argv
+
+def run(*args):
+    return subprocess.run(args,text=True,capture_output=True,timeout=5)
+
+def main():
+    with (cache/'wallpaper-switch.lock').open('w') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        files=sorted(p.resolve() for p in folder.rglob('*') if p.is_file() and p.suffix.lower() in {'.png','.jpg','.jpeg','.webp'})
+        if not files:
+            print(f'No wallpapers yet. Copy images into {folder}.')
+            return 0
+        current=state.read_text().rstrip('\n') if state.exists() else ''
+        candidates=[p for p in files if str(p)!=current] or files
+        chosen=Path(current) if restore and Path(current) in files else random.choice(candidates)
+        # A stable symlink avoids commas and other IPC delimiters in personal filenames.
+        safe=cache/'hyprpaper-files'; safe.mkdir(exist_ok=True)
+        link=safe/(hashlib.sha256(os.fsencode(chosen)).hexdigest()+chosen.suffix.lower())
+        if not link.is_symlink(): link.symlink_to(chosen)
+        monitors=json.loads(run('hyprctl','-j','monitors').stdout)
+        if not monitors:
+            print('No active Hyprland monitors.'); return 0
+        for monitor in monitors:
+            for attempt in range(30 if restore else 1):
+                result=run('hyprctl','hyprpaper','wallpaper',f'{monitor["name"]},{link},cover')
+                if result.returncode==0 and not any(x in result.stdout.lower() for x in ['error','couldn\'t','failed']): break
+                if restore: time.sleep(0.2)
+            else:
+                print(result.stdout+result.stderr,file=sys.stderr); return 1
+        tmp=state.with_suffix('.tmp'); tmp.write_text(str(chosen)+'\n'); tmp.replace(state)
+        print(chosen)
+        return 0
+try:
+    sys.exit(main())
+except (OSError,ValueError,subprocess.SubprocessError) as exc:
+    print(f'Wallpaper: {exc}',file=sys.stderr); sys.exit(1)
