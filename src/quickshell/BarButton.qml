@@ -11,6 +11,7 @@ Rectangle {
     property var pal: null          // palette for the tooltip surface
     property bool active: false
     property int minimumWidth: 0
+    property int glyphSize: 12       // media transport glyphs opt into 24
     property int horizontalPadding: parent && parent.objectName === "riceLeftRow" ? 7 : 6
     property bool tipShown: false
     signal clicked(int button)
@@ -27,7 +28,7 @@ Rectangle {
         color: button.ink
         Behavior on color { ColorAnimation { duration: 200 } }
         font.family: "Adwaita Sans"
-        font.pixelSize: 12
+        font.pixelSize: button.glyphSize
     }
     MouseArea {
         id: pointer

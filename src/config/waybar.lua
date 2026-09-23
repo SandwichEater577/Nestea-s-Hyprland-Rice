@@ -133,7 +133,8 @@ local bar = {
         ["on-click-right"] = "~/.local/bin/vscode-menu focus",
         ["tooltip-format"] = "VS Code\nClick: project menu\nRight-click: open / focus\nMiddle-click: open folder"
     },
-    ["height"] = 30,
+    -- Tall enough for the doubled media glyphs; matches the 40px cpp/quickshell bars.
+    ["height"] = 40,
     ["image#spotify-cover"] = {
         ["exec"] = "~/.local/bin/waybar-spotify --cover",
         ["interval"] = 2,

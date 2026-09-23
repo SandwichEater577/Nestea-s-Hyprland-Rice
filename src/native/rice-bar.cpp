@@ -123,6 +123,11 @@ static void apply_palette() {
         "#rice-group-center { padding: 2px 6px; }"
         "#rice-button { padding: 4px 8px; border-radius: 6px; transition: background-color 200ms ease-out, color 200ms ease-out; }"
         "#rice-button:hover { background: " + val("hover", "#303030") + "; }"
+        // Transport glyphs run at double size; the label gives back its vertical
+        // margin and this rule its vertical padding so the 40px bar never grows.
+        "#rice-media-button { padding: 0 8px; border-radius: 6px; transition: background-color 200ms ease-out, color 200ms ease-out; }"
+        "#rice-media-button:hover { background: " + val("hover", "#303030") + "; }"
+        "#rice-media-icon { font-size: 24px; }"
         "#workspace-idle { border-radius: 5px; }"
         "#workspace-idle:hover { background: " + val("hover", "#303030") + "; }"
         "#workspace-active { background: " + accent + "; border-radius: 5px; }"
@@ -336,6 +341,10 @@ int main(int argc, char **argv) {
     for (GtkWidget *label : {shuffle_label, prev_label, spotify_label, next_label, repeat_label}) {
         gtk_widget_set_margin_start(label, 9);
         gtk_widget_set_margin_end(label, 9);
+        gtk_widget_set_margin_top(label, 0);
+        gtk_widget_set_margin_bottom(label, 0);
+        gtk_widget_set_name(gtk_widget_get_parent(label), "rice-media-button");
+        gtk_widget_set_name(label, "rice-media-icon");
     }
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0); gtk_box_pack_start(GTK_BOX(body), spacer, TRUE, TRUE, 0);
     GtkWidget *right = group(body, "rice-group-right");
