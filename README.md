@@ -62,10 +62,16 @@ The sampled colors for each image are cached in `~/.cache/rice/wallpaper-palette
 
 The installer detects the primary output in a running Hyprland session and writes local display rules in `~/.config/rice/display-device.tsv` and `monitors.conf`. Adjust scale in the installer or live Displays menu. Connected secondary displays can be mirrored or extended from Displays; their choices live in `~/.config/rice/display-layout.tsv`. On another machine, review these local files rather than copying this laptop's output names. The Lua source used at login is `src/config/hyprland.lua`; a text fallback is `src/native/hyprland.conf`.
 
+## Updates
+
+`rice-update-watch.service` checks the upstream repository every 30 minutes and sends a desktop notification when new commits are published. The Settings menu opens with a **Download update** row at the very top while an update is waiting; choosing it starts `rice-update.service`, which runs `git pull --ff-only` and re-runs `./Installer --install` to redeploy scripts, services and generated configs, then reports the result as a notification. When nothing is new, the same row shows the last check time and re-checks on click.
+
+Check or apply from a terminal with `rice-update check` and `rice-update apply`. The cached state lives in `~/.local/state/rice/update.json`. Checking uses the checkout's own remote first and falls back to the public HTTPS mirror, so a default HTTPS clone needs no credentials while an SSH remote needs a registered key. **Share an idea** at the bottom of the Settings menu opens a new issue on this repository.
+
 ## Controls and troubleshooting
 
 The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The media cover opens the Media page; hover shows track details. The workspace buttons switch via Hyprland's dispatch API.
 
-Check services with `systemctl --user status rice-bar rice-controls rice-media-watch rice-hotspot`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-media-watch -b`. If a chosen engine cannot start, run `ui-backend lua` to return to Waybar. `./Installer --check` reports missing commands.
+Check services with `systemctl --user status rice-bar rice-controls rice-media-watch rice-hotspot rice-update-watch`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-media-watch -u rice-update-watch -b`. If a chosen engine cannot start, run `ui-backend lua` to return to Waybar. `./Installer --check` reports missing commands.
 
 Local connection data, wallpaper images, caches, keys and screenshots are ignored by Git. Review `git status` before publishing changes.

@@ -14,6 +14,7 @@ from gi.repository import Gtk, Gdk, Gio, GLib, GtkLayerShell, Pango
 import desktop as backend
 import display
 import mpris
+import update_check
 from private_data import load_private_data
 
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -91,7 +92,8 @@ def settings_data():
     shell=backend_file.read_text().strip() if backend_file.is_file() else 'lua'
     if shell not in ('lua','quickshell','cpp'):shell='lua'
     return dict(brightness=brightness,battery=battery_text,profile=backend.run('tlpctl','get'),displays=displays,shell=shell,
-                time_format=backend.run(str(Path.home()/'.local/bin/rice-clock'),'get') or '24h',media=mpris.options())
+                time_format=backend.run(str(Path.home()/'.local/bin/rice-clock'),'get') or '24h',media=mpris.options(),
+                update=update_check.status())
 
 
 def media_data():
@@ -500,6 +502,22 @@ class Panel(Gtk.ApplicationWindow):
         self.body.show_all()
 
     def render_settings(self,data):
+        update=data.get('update') or {}
+        group=self.section('Rice update')
+        if update.get('available'):
+            count=update.get('count') or 0
+            detail=f"{count} new commit{'s' if count != 1 else ''}" if count else 'New commits ready'
+            subject=(update.get('subject') or '').strip()
+            if subject:detail+=' · '+subject
+            self.row(group,'Download update',detail,'software-update-available-symbolic',self.download_update)
+        elif update.get('error'):
+            self.row(group,'Update check failed',update['error'],'dialog-information-symbolic',
+                     lambda:self.work(lambda:update_check.check()))
+        else:
+            checked=update_check.ago(update.get('checked'))
+            self.row(group,'Rice is up to date',
+                     f'Last checked {checked} · check again' if checked else 'Check now · checked every 30 minutes',
+                     'view-refresh-symbolic',lambda:self.work(lambda:update_check.check()))
         group=self.section('Clock · change this anytime')
         choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);group.pack_start(choices,False,False,0)
         for value,label in [('24h','24 hour · 21:30'),('12h','12 hour · 09:30 PM')]:
@@ -531,6 +549,20 @@ class Panel(Gtk.ApplicationWindow):
         if data['battery']:self.row(self.body,'Battery',data['battery'],'battery-good-symbolic')
         self.row(self.body,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',lambda:self.launch(['kitty','btop']))
         self.row(self.body,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',lambda:self.launch(['code',str(Path.home()/'.local/share/rice/source')]))
+        self.row(self.body,'Share an idea','Suggest a feature or improvement on GitHub','chat-message-new-symbolic',lambda:self.open_url(update_check.ISSUES))
+
+    def download_update(self):
+        # The installer restarts rice-controls, so the update runs in its own
+        # service instead of inside this panel.
+        self.work(lambda:backend.run('systemctl','--user','start','--no-block','rice-update.service',check=True),
+                  done=lambda _:self.close_panel())
+
+    def open_url(self,url):
+        try:
+            Gio.AppInfo.launch_default_for_uri(url,None)
+            self.close_panel()
+        except GLib.Error:
+            self.launch(['xdg-open',url])
 
     def switch_shell(self,choice):
         # ui-backend validates the choice, persists it and restarts the bar.

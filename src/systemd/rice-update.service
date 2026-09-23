@@ -1,0 +1,8 @@
+[Unit]
+Description=Download and install rice updates on demand
+
+[Service]
+Type=oneshot
+# No install section: this unit is started by the settings panel, not at login.
+TimeoutStartSec=0
+ExecStart=%h/.local/bin/rice-update apply

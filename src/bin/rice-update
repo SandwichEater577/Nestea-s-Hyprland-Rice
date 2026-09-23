@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Download upstream rice changes and redeploy them."""
+from pathlib import Path
+import json
+import subprocess
+import sys
+
+installed = Path.home() / '.local/lib/rice/update_check.py'
+sys.path.insert(0, str(installed.parent if installed.exists()
+                       else Path(__file__).resolve().parents[1] / 'lib/rice'))
+import update_check
+
+
+def main(argv):
+    mode = argv[1] if len(argv) > 1 else 'apply'
+    if mode in ('check', '--check'):
+        print(json.dumps(update_check.check(), indent=1))
+        return 0
+    if mode not in ('apply', '--apply', 'update'):
+        print('usage: rice-update [apply|check]', file=sys.stderr)
+        return 2
+    update_check.notify('Rice update', 'Downloading the latest rice…',
+                        icon='software-update-available-symbolic')
+    try:
+        subject = update_check.apply()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        update_check.notify('Rice update failed', str(exc).splitlines()[0][:160])
+        print(exc, file=sys.stderr)
+        return 1
+    update_check.notify('Rice updated', subject or 'The rice is up to date')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

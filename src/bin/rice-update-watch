@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Tell the desktop when the upstream rice repository gains new commits."""
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+installed = Path.home() / '.local/lib/rice/update_check.py'
+sys.path.insert(0, str(installed.parent if installed.exists()
+                       else Path(__file__).resolve().parents[1] / 'lib/rice'))
+import update_check
+
+FIRST_SECONDS = 45  # Let the session settle before the first check.
+MIN_SECONDS = 60
+
+
+def main():
+    time.sleep(FIRST_SECONDS)
+    while True:
+        started = time.monotonic()
+        try:
+            state = update_check.check()
+            if state.get('available') and state.get('sha') != state.get('notified_sha'):
+                update_check.notify_update(state)
+                # Only remembered after the notification was accepted, so a
+                # missing notification daemon is retried on the next cycle.
+                state['notified_sha'] = state.get('sha', '')
+                update_check.save(state)
+        except (OSError, RuntimeError, ValueError, KeyError, subprocess.SubprocessError):
+            # Offline, unauthenticated or unreachable upstream must not stop the
+            # watcher; the next cycle simply tries again.
+            pass
+        time.sleep(max(MIN_SECONDS, update_check.CHECK_SECONDS - (time.monotonic() - started)))
+
+
+if __name__ == '__main__':
+    main()

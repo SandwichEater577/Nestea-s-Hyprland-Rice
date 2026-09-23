@@ -1,0 +1,12 @@
+[Unit]
+Description=Notify the desktop when the rice repository has updates
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/rice-update-watch
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

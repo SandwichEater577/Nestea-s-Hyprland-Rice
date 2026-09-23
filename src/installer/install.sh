@@ -68,15 +68,20 @@ if [[ $dry != --dry-run ]]; then
 fi
 
 step 4 'User services'
-plan 'link and enable the bar, control panel, media watcher and preferred hotspot user services'
+plan 'link and enable the bar, control panel, media watcher, updater and preferred hotspot user services'
 if [[ $dry != --dry-run ]]; then
     ln -sfn "$repo/src/systemd/rice-bar.service" "$HOME/.config/systemd/user/rice-bar.service"
     ln -sfn "$repo/src/systemd/rice-controls.service" "$HOME/.config/systemd/user/rice-controls.service"
     ln -sfn "$repo/src/systemd/rice-media-watch.service" "$HOME/.config/systemd/user/rice-media-watch.service"
     ln -sfn "$repo/src/systemd/rice-hotspot.service" "$HOME/.config/systemd/user/rice-hotspot.service"
+    ln -sfn "$repo/src/systemd/rice-update-watch.service" "$HOME/.config/systemd/user/rice-update-watch.service"
+    # rice-update.service is deliberately not enabled; the settings panel starts
+    # it on demand and it has no install section.
+    ln -sfn "$repo/src/systemd/rice-update.service" "$HOME/.config/systemd/user/rice-update.service"
     systemctl --user daemon-reload
-    systemctl --user enable rice-bar.service rice-controls.service rice-media-watch.service rice-hotspot.service
+    systemctl --user enable rice-bar.service rice-controls.service rice-media-watch.service rice-hotspot.service rice-update-watch.service
     systemctl --user restart rice-media-watch.service
+    systemctl --user restart rice-update-watch.service
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then systemctl --user restart rice-controls.service; fi
     systemctl --user restart rice-hotspot.service
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
