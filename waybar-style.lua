@@ -19,7 +19,7 @@ return {
         { key = "border-radius", value = "10px" },
         { key = "padding", value = "0 5px" },
     } },
-    { selector = "#clock, #custom-audio, #bluetooth, #custom-network, #battery, #custom-terminal, #custom-control, #custom-files, #custom-power, #custom-vscode", entries = {
+    { selector = "#clock, #custom-audio, #bluetooth, #custom-network, #battery, #custom-terminal, #custom-control, #custom-files, #custom-display, #custom-power, #custom-vscode", entries = {
         { key = "padding", value = "0 7px" },
         { key = "margin", value = "0" },
         { key = "background", value = "transparent" },
@@ -48,7 +48,7 @@ return {
         { key = "background", value = "#dedede" },
         { key = "color", value = "#181818" },
     } },
-    { selector = "#custom-audio:hover, #custom-control:hover, #custom-power:hover, #custom-files:hover, #custom-terminal:hover, #custom-vscode:hover, #bluetooth:hover, #custom-network:hover", entries = {
+    { selector = "#custom-audio:hover, #custom-control:hover, #custom-power:hover, #custom-files:hover, #custom-terminal:hover, #custom-display:hover, #custom-vscode:hover, #bluetooth:hover, #custom-network:hover", entries = {
         { key = "background", value = "#303030" },
         { key = "color", value = "#ffffff" },
         { key = "border-radius", value = "6px" },

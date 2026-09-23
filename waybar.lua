@@ -46,6 +46,14 @@ return {
         ["on-click"] = "~/.local/bin/control-menu",
         ["tooltip-format"] = "Settings · brightness, sound, connectivity"
     },
+    ["custom/display"] = {
+        ["exec"] = "python3 ~/.local/lib/rice/display.py status",
+        ["format"] = "{}",
+        ["hide-empty-text"] = true,
+        ["interval"] = 2,
+        ["on-click"] = "~/.local/bin/desktop-panel display",
+        ["return-type"] = "json"
+    },
     ["custom/files"] = {
         ["format"] = "",
         ["on-click"] = "thunar",
@@ -144,7 +152,7 @@ return {
     ["margin-top"] = 5,
     ["modules-center"] = {"hyprland/workspaces"},
     ["modules-left"] = {"clock", "custom/audio", "image#spotify-cover", "custom/spotify-shuffle", "custom/spotify-prev", "custom/spotify", "custom/spotify-next", "custom/spotify-repeat"},
-    ["modules-right"] = {"custom/vscode", "custom/terminal", "custom/files", "bluetooth", "custom/network", "battery", "custom/control", "custom/power"},
+    ["modules-right"] = {"custom/vscode", "custom/terminal", "custom/files", "custom/display", "bluetooth", "custom/network", "battery", "custom/control", "custom/power"},
     ["position"] = "top",
     ["spacing"] = 0
 }

@@ -1,6 +1,26 @@
 -- Native Hyprland configuration.
 hl.monitor({ output="eDP-1", mode="preferred", position="auto", scale=1.25 })
-hl.monitor({ output="HDMI-A-1", mode="1920x1200@59.95", position="auto", scale=1.25, mirror="eDP-1" })
+local display_rules = {
+    ["HDMI-A-1"] = { layout="mirror", mode="1920x1200@59.95", scale=1.25 },
+}
+local display_file = io.open(assert(os.getenv("HOME")) .. "/config/data/display-layout.tsv", "r")
+if display_file then
+    for line in display_file:lines() do
+        local output, layout, mode, scale = line:match("^([^\t]+)\t([^\t]+)\t([^\t]+)\t([^\t]+)$")
+        scale = tonumber(scale)
+        if output and output:match("^[%w_.%-]+$") and (layout == "mirror" or layout == "extend")
+            and (mode == "preferred" or mode:match("^%d+x%d+@%d+%.?%d*$"))
+            and scale and scale >= 0.5 and scale <= 4 then
+            display_rules[output] = { layout=layout, mode=mode, scale=scale }
+        end
+    end
+    display_file:close()
+end
+for output, rule in pairs(display_rules) do
+    local monitor = { output=output, mode=rule.mode, position="auto", scale=rule.scale }
+    if rule.layout == "mirror" then monitor.mirror = "eDP-1" end
+    hl.monitor(monitor)
+end
 hl.monitor({ output="", mode="preferred", position="auto", scale="auto" })
 hl.workspace_rule({ workspace="1", monitor="eDP-1", default=true })
 hl.env("XCURSOR_SIZE", "24")

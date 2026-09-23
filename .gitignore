@@ -44,6 +44,7 @@ local/lib/rice/*
 !local/lib/rice/audio_watch.py
 !local/lib/rice/bluetooth_pair.py
 !local/lib/rice/desktop.py
+!local/lib/rice/display.py
 !local/lib/rice/hotspot.py
 !local/lib/rice/panels.css
 !local/lib/rice/panels.py

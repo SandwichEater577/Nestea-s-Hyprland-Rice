@@ -17,6 +17,11 @@ before selecting either parser. This laptop's monitor, battery, and scaling
 settings are examples to adapt on another machine.
 This laptop's `HDMI-A-1` projector is configured to mirror `eDP-1` at
 1920×1200; the generic monitor rule still handles other outputs.
+When an external display is connected, a monitor icon appears in Waybar and
+the quick settings panel gains a Displays entry. The panel shows connected
+outputs and lets you mirror the laptop or extend the desktop to the right.
+Choices persist in the ignored `data/display-layout.tsv` file and survive a
+Hyprland reload; on this machine HDMI defaults to mirroring until changed.
 
 The `local/bin` and `local/lib` trees mirror the scripts installed under
 `~/.local`. To install on another machine, copy those curated trees to the same

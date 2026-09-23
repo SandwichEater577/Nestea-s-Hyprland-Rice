@@ -12,6 +12,7 @@ gi.require_version('Gtk', '3.0')
 gi.require_version('GtkLayerShell', '0.1')
 from gi.repository import Gtk, Gdk, Gio, GLib, GtkLayerShell, Pango
 import desktop as backend
+import display
 from private_data import load_private_data
 
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -79,7 +80,11 @@ def settings_data():
     brightness=int(fields[3].rstrip('%')) if len(fields)>3 else None
     battery=Path('/sys/class/power_supply/BAT0')
     battery_text=(battery/'capacity').read_text().strip()+'% · '+(battery/'status').read_text().strip() if battery.exists() else ''
-    return dict(brightness=brightness,battery=battery_text,profile=backend.run('tlpctl','get'))
+    try:
+        displays=len(display.display_data()['external'])
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        displays=0
+    return dict(brightness=brightness,battery=battery_text,profile=backend.run('tlpctl','get'),displays=displays)
 
 
 class Panel(Gtk.ApplicationWindow):
@@ -295,14 +300,14 @@ class Panel(Gtk.ApplicationWindow):
         self.page=page
         self.generation+=1
         self.card.set_halign(Gtk.Align.START if self.anchor_left else Gtk.Align.END)
-        self.title.set_text({'audio':'Sound','network':'Wi-Fi','nearby':'Nearby networks','bluetooth':'Bluetooth','settings':'Quick settings','power':'Power','code':'VS Code'}.get(page,page))
+        self.title.set_text({'audio':'Sound','network':'Wi-Fi','nearby':'Nearby networks','bluetooth':'Bluetooth','display':'Displays','settings':'Quick settings','power':'Power','code':'VS Code'}.get(page,page))
         self.back.set_visible(bool(self.history))
         self.refresh.set_visible(page not in ('power','confirm'))
         self.feedback.hide()
         self.reset_body()
         self.body.pack_start(self.label('Loading…','subtitle'),False,False,0)
         self.body.show_all()
-        loaders={'audio':sound_data,'network':wifi_data,'nearby':wifi_data,'bluetooth':bluetooth_data,'settings':settings_data,'code':CODE['recent_projects']}
+        loaders={'audio':sound_data,'network':wifi_data,'nearby':wifi_data,'bluetooth':bluetooth_data,'display':display.display_data,'settings':settings_data,'code':CODE['recent_projects']}
         if page=='power':self.render_power();return
         self.work(loaders[page],done=lambda data:self.render(page,data))
 
@@ -480,9 +485,39 @@ class Panel(Gtk.ApplicationWindow):
         group=self.section('Quick controls')
         for name,detail,icon,page in [('Sound','Volume and output devices','audio-volume-high-symbolic','audio'),('Wi-Fi','Networks and connection','network-wireless-symbolic','network'),('Bluetooth','Headphones and other devices','bluetooth-symbolic','bluetooth')]:
             self.row(group,name,detail,icon,lambda p=page:self.load(p))
+        if data['displays']:
+            self.row(group,'Displays',f"{data['displays']} external display{'s' if data['displays'] != 1 else ''} connected",'video-display-symbolic',lambda:self.load('display'))
         if data['battery']:self.row(self.body,'Battery',data['battery'],'battery-good-symbolic')
         self.row(self.body,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',lambda:self.launch(['kitty','btop']))
         self.row(self.body,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',lambda:self.launch(['code',str(Path.home()/'config')]))
+
+    def render_display(self,data):
+        internal=data['internal']
+        if internal:
+            group=self.section('Laptop')
+            self.row(group,internal.get('model') or internal['name'],
+                     f"{internal['name']} · {internal['width']}×{internal['height']} · {internal['scale']}× scale",
+                     'computer-symbolic')
+        if not data['external']:
+            self.row(self.body,'No external display','Connect HDMI, DisplayPort or USB-C','video-display-symbolic')
+            return
+        for monitor in data['external']:
+            group=self.section(monitor.get('model') or monitor['name'])
+            mirrored=bool(internal and str(monitor['mirrorOf']) in (str(internal['id']),internal['name']))
+            current='Mirroring laptop' if mirrored else 'Extended desktop'
+            self.row(group,monitor['name'],
+                     f"{current} · {monitor['width']}×{monitor['height']} · {monitor['refreshRate']:.0f} Hz",
+                     'video-display-symbolic')
+            actions=Gtk.Box(spacing=6)
+            actions.set_homogeneous(True)
+            group.pack_start(actions,False,False,0)
+            if internal:
+                self.action_button(actions,'Mirror laptop',
+                                   lambda name=monitor['name']:self.work(lambda:display.apply_layout(name,'mirror')),
+                                   primary=mirrored)
+            self.action_button(actions,'Extend right',
+                               lambda name=monitor['name']:self.work(lambda:display.apply_layout(name,'extend')),
+                               primary=not mirrored)
 
     def action_button(self,parent,title,fn,primary=False):
         button=Gtk.Button(label=title)
@@ -548,13 +583,16 @@ class App(Gtk.Application):
 
     def do_command_line(self,cmd):
         args=cmd.get_arguments();page=args[1] if len(args)>1 else 'settings'
-        if page not in ('audio','network','bluetooth','settings','power','code'):return 1
+        if page not in ('audio','network','bluetooth','display','settings','power','code'):return 1
         if self.panel and not self.panel.closed:
             if self.panel.page==page:self.panel.close_panel()
             else:
                 self.panel.history=[];self.panel.anchor_left=page=='audio';self.panel.load(page,remember=False)
         else:
+            self.hold()
             self.panel=Panel(self,page)
+            self.panel.connect('destroy',lambda *_:self.release())
+            self.panel.present()
         return 0
 
 if __name__=='__main__':
