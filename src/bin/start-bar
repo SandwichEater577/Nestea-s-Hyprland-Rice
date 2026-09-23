@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Hyprland's startup event runs after the Wayland socket exists. Import that
+# environment before starting the supervised user service.
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE DISPLAY
+if systemctl --user cat rice-bar.service >/dev/null 2>&1; then
+    systemctl --user reset-failed rice-bar.service
+    systemctl --user start rice-bar.service
+else
+    exec "$HOME/.local/bin/start-waybar"
+fi

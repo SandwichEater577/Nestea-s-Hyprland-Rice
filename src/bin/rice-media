@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Actions and opt-in source selection for desktop and browser MPRIS players."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+installed = Path.home() / '.local/lib/rice/mpris.py'
+sys.path.insert(0, str(installed.parent if installed.exists() else Path(__file__).resolve().parents[1] / 'lib/rice'))
+import mpris
+
+
+def notify():
+    kick = Path.home() / '.local/state/rice/status-kick'
+    kick.parent.mkdir(parents=True, exist_ok=True)
+    kick.touch(exist_ok=True)
+    subprocess.run(['pkill', '-RTMIN+10', '-x', 'waybar'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def set_option(name, value):
+    if name not in ('desktop_spotify', 'browser_media') or value not in ('on', 'off'):
+        raise ValueError('usage: rice-media set desktop_spotify|browser_media on|off')
+    path = mpris.OPTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    options = mpris.options()
+    options[name] = value == 'on'
+    temp = path.with_name(f'{path.name}.{os.getpid()}.tmp')
+    temp.write_text(json.dumps(options, indent=2) + '\n')
+    temp.chmod(0o600)
+    temp.replace(path)
+    notify()
+
+
+def action(name):
+    selected = mpris.selected_player()
+    if not selected:
+        return 1
+    cmd = {'toggle': ['play-pause'], 'previous': ['previous'], 'next': ['next'],
+           'up': ['volume', '0.05+'], 'down': ['volume', '0.05-']}.get(name)
+    if cmd is None:
+        raise ValueError('unknown media action')
+    result = subprocess.run(['playerctl', f'--player={selected}', *cmd])
+    notify()
+    return result.returncode
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ['get']:
+        print(json.dumps(mpris.options()))
+    elif len(args) == 3 and args[0] == 'set':
+        set_option(args[1], args[2])
+    elif args == ['player']:
+        print(mpris.selected_player())
+    elif len(args) == 1:
+        return action(args[0])
+    else:
+        raise ValueError('usage: rice-media get|set KEY on|off|player|toggle|previous|next|up|down')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as error:
+        print(f'Media: {error}', file=sys.stderr)
+        sys.exit(1)

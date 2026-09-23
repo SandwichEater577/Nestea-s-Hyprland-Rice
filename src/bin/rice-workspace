@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Waybar workspace button backed by Hyprland's event socket."""
+import json
+import os
+from pathlib import Path
+import socket
+import subprocess
+import sys
+import time
+
+
+def active():
+    try:
+        result = subprocess.run(['hyprctl', '-j', 'activeworkspace'], capture_output=True,
+                                text=True, timeout=2)
+        return int(json.loads(result.stdout).get('id', 0))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def watch(number):
+    previous = None
+
+    def emit(current):
+        nonlocal previous
+        if current != previous:
+            print(json.dumps({'text': str(number),
+                              'class': 'active' if current == number else 'inactive'}), flush=True)
+            previous = current
+
+    emit(active())
+    root = Path(os.environ.get('XDG_RUNTIME_DIR', '/run/user/' + str(os.getuid())))
+    signature = os.environ.get('HYPRLAND_INSTANCE_SIGNATURE', '')
+    path = root / 'hypr' / signature / '.socket2.sock'
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX) as connection:
+                connection.connect(str(path))
+                emit(active())
+                with connection.makefile() as events:
+                    for line in events:
+                        if line.startswith(('workspace>>', 'workspacev2>>')):
+                            try:
+                                emit(int(line.split('>>', 1)[1].split(',', 1)[0]))
+                            except ValueError:
+                                emit(active())
+        except (OSError, BrokenPipeError):
+            emit(active())
+            time.sleep(1)
+
+
+def main():
+    args = sys.argv[1:]
+    watching = args[:1] == ['--watch']
+    if watching:
+        args = args[1:]
+    if len(args) != 1 or not args[0].isdigit() or not 1 <= int(args[0]) <= 5:
+        raise ValueError('usage: rice-workspace [--watch] 1..5')
+    number = int(args[0])
+    if watching:
+        watch(number)
+    else:
+        raise SystemExit(subprocess.run(['hyprctl', 'dispatch',
+                         f'hl.dsp.focus({{workspace={number}}})']).returncode)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, BrokenPipeError) as error:
+        print(error, file=sys.stderr)
+        sys.exit(1)

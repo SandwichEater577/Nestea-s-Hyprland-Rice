@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""Status reader for the QuickShell and native bars.
+
+bar-status           one bounded read, one JSON object (checks and fallback)
+bar-status --watch   long-lived process; one JSON line per change, with
+                     tiered refresh (audio 1s, network/media 2s, display and
+                     bluetooth 10s, battery 30s), cover downloads off the
+                     critical path, and an immediate re-read after a click
+                     (bars touch ~/.local/state/rice/status-kick).
+"""
+import html
+import json
+import os
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event, Lock, Thread
+import subprocess
+import sys
+import time
+import signal
+
+sys.path.insert(0, str(Path.home() / '.local/lib/rice'))
+import mpris
+import rice_status
+
+KICK = rice_status.STATE / 'status-kick'
+FIELDS = ('audio', 'audio_tooltip', 'network', 'network_tooltip', 'display',
+          'display_tooltip', 'bluetooth', 'spotify', 'spotify_running', 'cover',
+          'track', 'repeat', 'repeat_tooltip', 'shuffle', 'shuffle_tooltip', 'battery')
+DEFAULTS = {name: False if name == 'spotify_running' else '' for name in FIELDS}
+PERIOD = {'fast': 1.0, 'network': 2.0, 'media': 2.0, 'slow': 10.0, 'battery': 30.0}
+EVENT_PROCESSES = set()
+EVENT_LOCK = Lock()
+STOP = Event()
+
+
+def stop_events():
+    STOP.set()
+    with EVENT_LOCK:
+        processes = list(EVENT_PROCESSES)
+    for process in processes:
+        if process.poll() is None:
+            process.terminate()
+    for process in processes:
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def watch_events(args, changed, match):
+    """Wake a status tier on OS signals; retry if the event source restarts."""
+    while not STOP.is_set():
+        try:
+            with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  text=True, bufsize=1) as process:
+                with EVENT_LOCK:
+                    EVENT_PROCESSES.add(process)
+                try:
+                    if STOP.is_set():
+                        process.terminate()
+                    for line in process.stdout:
+                        if match(line):
+                            changed.set()
+                finally:
+                    with EVENT_LOCK:
+                        EVENT_PROCESSES.discard(process)
+        except OSError:
+            pass
+        STOP.wait(2)
+
+
+def read_fast():
+    sound = rice_status.audio()
+    return {'audio': sound['text'], 'audio_tooltip': sound.get('tooltip', '')}
+
+
+def read_network():
+    network = rice_status.network()
+    return {'network': network['text'],
+            'network_tooltip': html.unescape(network.get('tooltip', ''))}
+
+
+def read_media():
+    player = mpris.get_state(('loop', 'shuffle', 'metadata'))
+    playing = mpris.status_widget(player)
+    repeat = mpris.repeat_widget(player)
+    shuffle = mpris.shuffle_widget(player)
+    return {'spotify': playing['text'], 'spotify_running': bool(player),
+            'repeat': repeat['text'], 'repeat_tooltip': repeat.get('tooltip', ''),
+            'shuffle': shuffle['text'], 'shuffle_tooltip': shuffle.get('tooltip', '')}, player
+
+
+def read_slow():
+    display = rice_status.display()
+    return {'display': display['text'], 'display_tooltip': display.get('tooltip', ''),
+            'bluetooth': rice_status.bluetooth()}
+
+
+def read_battery():
+    battery = next(iter(Path('/sys/class/power_supply').glob('BAT*')), None)
+    try:
+        text = (battery / 'capacity').read_text().strip() + '%'
+    except (OSError, TypeError):
+        text = ''
+    return {'battery': text}
+
+
+def media_key(player):
+    metadata = (player or {}).get('Metadata') or {}
+    return (metadata.get('mpris:artUrl', ''), metadata.get('xesam:title', ''),
+            metadata.get('xesam:artist', ''))
+
+
+def fetch_cover(key, player):
+    try:
+        return key, mpris.cover(player)
+    except (OSError, ValueError, TypeError):
+        return key, ('', '')
+
+
+def main():
+    # Independent system reads can overlap; the slowest one sets the latency.
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        media_task = pool.submit(read_media)
+        fast_task = pool.submit(read_fast)
+        network_task = pool.submit(read_network)
+        slow_task = pool.submit(read_slow)
+        battery_task = pool.submit(read_battery)
+        media, player = media_task.result()
+        parts = fast_task.result()
+        parts.update(network_task.result())
+        parts.update(slow_task.result())
+        parts.update(battery_task.result())
+        parts.update(media)
+    try:
+        cover, track = mpris.cover(player)
+    except (OSError, ValueError, TypeError):
+        cover, track = '', ''
+    parts['cover'], parts['track'] = cover, track
+    print(json.dumps({name: parts.get(name, DEFAULTS[name]) for name in FIELDS},
+                     ensure_ascii=False))
+
+
+def watch():
+    """Emit a JSON line whenever any field changes; re-read everything the
+    moment the kick file moves, so clicks never wait a full tier."""
+    pool = ThreadPoolExecutor(max_workers=4)
+    cover_pool = ThreadPoolExecutor(max_workers=1)
+    audio_changed, media_changed = Event(), Event()
+    Thread(target=watch_events, args=(['pactl', 'subscribe'], audio_changed,
+           lambda line: any(tag in line for tag in (' on sink ', ' on server ', ' on card '))), daemon=True).start()
+    Thread(target=watch_events, args=(['dbus-monitor', '--session',
+           "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',path='/org/mpris/MediaPlayer2'",
+           "type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0namespace='org.mpris.MediaPlayer2'"],
+           media_changed, lambda line: 'member=PropertiesChanged' in line or 'member=NameOwnerChanged' in line), daemon=True).start()
+    KICK.parent.mkdir(parents=True, exist_ok=True)
+    KICK.touch(exist_ok=True)         # bars kick this file after every click
+    readers = {'fast': read_fast, 'network': read_network, 'slow': read_slow,
+               'battery': read_battery}
+    parts = dict(DEFAULTS)
+    pending = {}
+    next_due = {tier: 0.0 for tier in PERIOD}
+    first_round = set(PERIOD)
+    last_emit = None
+    kick_seen = None
+    last_media_key = None
+    cover_key = None
+    cover_job = None
+
+    def emit(force=False):
+        nonlocal last_emit
+        composed = {name: parts.get(name, DEFAULTS[name]) for name in FIELDS}
+        if force or composed != last_emit:
+            try:
+                print(json.dumps(composed, ensure_ascii=False), flush=True)
+            except (BrokenPipeError, OSError):
+                try:
+                    sys.stdout.close()
+                except OSError:
+                    pass
+                sys.stdout = open(os.devnull, 'w')
+                raise SystemExit(0)
+            last_emit = composed
+
+    while True:
+        try:
+            kick = KICK.stat().st_mtime_ns
+        except OSError:
+            kick = None
+        if kick_seen is None:
+            kick_seen = kick          # the first observation is not a kick
+        elif kick != kick_seen:
+            kick_seen = kick
+            next_due = {tier: 0.0 for tier in next_due}
+            if not first_round:       # a click asked for a fresh view now
+                emit(force=True)
+
+        now = time.monotonic()
+        if audio_changed.is_set():
+            audio_changed.clear()
+            next_due['fast'] = 0.0
+        if media_changed.is_set():
+            media_changed.clear()
+            next_due['media'] = 0.0
+        for tier, future in list(pending.items()):
+            if not future.done():
+                continue
+            del pending[tier]
+            result = future.result()
+            if tier == 'media':
+                media, player = result
+                parts.update(media)
+                key = media_key(player)
+                if not player:
+                    parts['cover'] = parts['track'] = ''
+                    cover_key = None
+                elif cover_job is None and key and key != cover_key:
+                    cover_job = cover_pool.submit(fetch_cover, key, player)
+                last_media_key = key
+            else:
+                parts.update(result)
+            first_round.discard(tier)
+            if not first_round:
+                emit()
+
+        if cover_job is not None and cover_job.done():
+            key, (cover, track) = cover_job.result()
+            cover_job = None
+            if key == last_media_key:
+                parts['cover'], parts['track'] = cover, track
+                # An empty result lets the next media tick retry once the
+                # failure marker in mpris.cover expires.
+                cover_key = key if cover else None
+                if not first_round:
+                    emit()
+
+        if 'media' not in pending and now >= next_due['media']:
+            next_due['media'] = now + PERIOD['media']
+            pending['media'] = pool.submit(read_media)
+        for tier, reader in readers.items():
+            if tier not in pending and now >= next_due[tier]:
+                next_due[tier] = now + PERIOD[tier]
+                pending[tier] = pool.submit(reader)
+        time.sleep(0.1)
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    try:
+        if '--watch' in sys.argv[1:]:
+            watch()
+        else:
+            main()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_events()

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Triple-click power button: one click opens the session menu, three rapid
+# clicks (each within 0.7s of the previous) power the machine off.
+# Set RICE_POWER_DRYRUN=1 to test the counter without shutting down.
+set -u
+state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/rice"
+state="$state_dir/power-clicks"
+mkdir -p "$state_dir"
+now=$(($(date +%s%N) / 1000000))
+count=0
+last=0
+exec 9>>"$state.lock"
+flock 9
+if [ -f "$state" ]; then
+    read -r count last <"$state" || true
+fi
+case "$count" in ''|*[!0-9]*) count=0 ;; esac
+case "$last" in ''|*[!0-9]*) last=0 ;; esac
+if [ $((now - last)) -gt 700 ]; then count=0; fi
+count=$((count + 1))
+printf '%s %s\n' "$count" "$now" >"$state"
+if [ "$count" -ge 3 ]; then
+    : >"$state"
+    if [ "${RICE_POWER_DRYRUN:-0}" = 1 ]; then
+        echo "power-click: would power off"
+        exit 0
+    fi
+    exec systemctl poweroff
+fi
+if [ "$count" -eq 1 ]; then
+    exec "$HOME/.local/bin/desktop-menu" power
+fi
+exit 0

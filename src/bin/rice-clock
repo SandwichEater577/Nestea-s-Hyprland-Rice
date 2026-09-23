@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""One clock format shared by all bar renderers and the settings panel."""
+import json
+import os
+from pathlib import Path
+import sys
+import time
+
+FILE = Path.home() / '.config/rice/settings.json'
+FORMATS = {'24h': '%H:%M:%S', '12h': '%I:%M:%S %p'}
+
+
+def selected():
+    try:
+        value = json.loads(FILE.read_text()).get('time_format')
+        return value if value in FORMATS else '24h'
+    except (OSError, ValueError, TypeError):
+        return '24h'
+
+
+def set_format(value):
+    if value not in FORMATS:
+        raise ValueError('time format must be 12h or 24h')
+    FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(FILE.read_text())
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    data['time_format'] = value
+    temp = FILE.with_name(f'{FILE.name}.{os.getpid()}.tmp')
+    temp.write_text(json.dumps(data, indent=2) + '\n')
+    temp.replace(FILE)
+
+
+def status():
+    now = time.localtime()
+    return {'text': '  ' + time.strftime(FORMATS[selected()], now),
+            'tooltip': time.strftime('%A, %d %B %Y', now)}
+
+
+def main():
+    args = sys.argv[1:]
+    if args == ['get']:
+        print(selected())
+    elif len(args) == 2 and args[0] == 'set':
+        set_format(args[1])
+        print(args[1])
+    elif args == []:
+        print(json.dumps(status(), ensure_ascii=False))
+    elif args == ['--watch']:
+        while True:
+            print(json.dumps(status(), ensure_ascii=False), flush=True)
+            time.sleep(max(.05, 1.0 - time.time() % 1.0))
+    else:
+        raise ValueError('usage: rice-clock [get|set 12h|set 24h|--watch]')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        print(f'Clock: {error}', file=sys.stderr)
+        sys.exit(1)
