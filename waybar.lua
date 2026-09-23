@@ -32,13 +32,14 @@ return {
     },
     ["custom/audio"] = {
         ["exec"] = "python3 -u ~/.local/lib/rice/audio_watch.py",
+        ["exec-on-event"] = false,
         ["on-click"] = "~/.local/bin/desktop-menu audio mute",
         ["on-click-middle"] = "~/.local/bin/desktop-menu audio boost",
         ["on-click-right"] = "~/.local/bin/desktop-menu audio",
         ["on-scroll-down"] = "~/.local/bin/desktop-menu audio down",
         ["on-scroll-up"] = "~/.local/bin/desktop-menu audio up",
         ["return-type"] = "json",
-        ["smooth-scrolling-threshold"] = 3
+        ["smooth-scrolling-threshold"] = 1
     },
     ["custom/control"] = {
         ["format"] = "",

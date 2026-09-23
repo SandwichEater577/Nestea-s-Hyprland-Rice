@@ -15,6 +15,8 @@ lua ~/config/apply.lua
 Hyprland version is kept in `native/hyprland.conf`. Check your Hyprland version
 before selecting either parser. This laptop's monitor, battery, and scaling
 settings are examples to adapt on another machine.
+This laptop's `HDMI-A-1` projector is configured to mirror `eDP-1` at
+1920×1200; the generic monitor rule still handles other outputs.
 
 The `local/bin` and `local/lib` trees mirror the scripts installed under
 `~/.local`. To install on another machine, copy those curated trees to the same
@@ -39,8 +41,9 @@ private backup of both the encrypted file and its key.
 
 ## Controls
 
-Sound: left click mutes, middle click toggles the 100% or 150% ceiling, right
-click opens outputs and app volume, scroll adjusts volume. Wi-Fi: right click
+Sound: left click mutes, pressing the mouse wheel over the sound widget toggles
+the 100% or 150% ceiling, right click opens outputs and app volume, and each
+wheel step adjusts volume. Wi-Fi: right click
 opens the network panel; the bar shows signal and download rate. Bluetooth
 opens pairing and connection controls. Spotify controls appear only while its
 player is available. Super+T changes wallpaper; Super+R opens Rofi.

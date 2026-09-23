@@ -68,8 +68,10 @@ def audio(action):
             print(json.dumps({'text': '󰝟 —', 'tooltip': 'No audio output'})); return
         percent = round(float(value.split()[1]) * 100)
         muted = 'MUTED' in value
-        print(json.dumps({'text': ('󰝟' if muted else '') + f'\u2002\u2002{percent}%' + (' +' if BOOST.exists() else ''),
-            'tooltip': 'Left: mute · Middle: toggle 100% / 150% ceiling\nRight: output and application volume\nScroll / two fingers: volume', 'class': 'muted' if muted else 'normal'}))
+        boosted = BOOST.exists()
+        print(json.dumps({'text': ('󰝟' if muted else '') + f'\u2002\u2002{percent}%' + (' +' if boosted else ''),
+            'tooltip': ('Wheel click: lock to 100%' if boosted else 'Wheel click: unlock 150%') + '\nWheel up/down: volume · Left click: mute\nRight click: output and application volume',
+            'class': 'boosted' if boosted else ('muted' if muted else 'normal')}))
         return
     while True:
         sinks = json.loads(run('pactl', '-f', 'json', 'list', 'sinks', check=True))

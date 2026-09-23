@@ -1,5 +1,6 @@
 -- Native Hyprland configuration.
 hl.monitor({ output="eDP-1", mode="preferred", position="auto", scale=1.25 })
+hl.monitor({ output="HDMI-A-1", mode="1920x1200@59.95", position="auto", scale=1.25, mirror="eDP-1" })
 hl.monitor({ output="", mode="preferred", position="auto", scale="auto" })
 hl.workspace_rule({ workspace="1", monitor="eDP-1", default=true })
 hl.env("XCURSOR_SIZE", "24")

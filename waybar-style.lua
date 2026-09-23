@@ -34,6 +34,9 @@ return {
     { selector = "#custom-spotify-shuffle.enabled, #custom-spotify-repeat.enabled", entries = {
         { key = "border-bottom", value = "1px solid #a8a8a8" },
     } },
+    { selector = "#custom-audio.boosted", entries = {
+        { key = "border-bottom", value = "2px solid #dedede" },
+    } },
     { selector = "#workspaces button", entries = {
         { key = "color", value = "#a3a3a3" },
         { key = "background", value = "transparent" },
