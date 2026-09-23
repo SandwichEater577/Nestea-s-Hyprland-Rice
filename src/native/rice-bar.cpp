@@ -128,6 +128,7 @@ static void apply_palette() {
         "#rice-media-button { padding: 0 8px; border-radius: 6px; transition: background-color 200ms ease-out, color 200ms ease-out; }"
         "#rice-media-button:hover { background: " + val("hover", "#303030") + "; }"
         "#rice-media-icon { font-size: 24px; }"
+        "#rice-media-icon-small { font-size: 16px; }"
         "#workspace-idle { border-radius: 5px; }"
         "#workspace-idle:hover { background: " + val("hover", "#303030") + "; }"
         "#workspace-active { background: " + accent + "; border-radius: 5px; }"
@@ -346,6 +347,10 @@ int main(int argc, char **argv) {
         gtk_widget_set_name(gtk_widget_get_parent(label), "rice-media-button");
         gtk_widget_set_name(label, "rice-media-icon");
     }
+    // Shuffle and repeat are secondary toggles, so they sit at two-thirds
+    // the size of the three transport glyphs.
+    for (GtkWidget *label : {shuffle_label, repeat_label})
+        gtk_widget_set_name(label, "rice-media-icon-small");
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0); gtk_box_pack_start(GTK_BOX(body), spacer, TRUE, TRUE, 0);
     GtkWidget *right = group(body, "rice-group-right");
     button(right, "󰨞", [](guint b){

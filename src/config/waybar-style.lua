@@ -27,11 +27,17 @@ return {
         { key = "background", value = "transparent" },
     } },
     { selector = "#custom-spotify, #custom-spotify-prev, #custom-spotify-next, #custom-spotify-shuffle, #custom-spotify-repeat", entries = {
-        { key = "font-size", value = "28px" },
         { key = "min-width", value = "15px" },
         { key = "padding", value = "0 5px" },
         { key = "background", value = "transparent" },
         { key = "color", value = "@rice_foreground" },
+    } },
+    { selector = "#custom-spotify, #custom-spotify-prev, #custom-spotify-next", entries = {
+        { key = "font-size", value = "28px" },
+    } },
+    -- Shuffle and repeat are secondary toggles: two-thirds the transport size.
+    { selector = "#custom-spotify-shuffle, #custom-spotify-repeat", entries = {
+        { key = "font-size", value = "18px" },
     } },
     { selector = "#custom-spotify-shuffle.enabled, #custom-spotify-repeat.enabled", entries = {
         { key = "border-bottom", value = "1px solid @rice_accent" },
