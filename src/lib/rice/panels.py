@@ -80,15 +80,24 @@ def bluetooth_data():
 
 
 def settings_data():
-    fields=backend.run('brightnessctl','-m').split(',')
-    brightness=int(fields[3].rstrip('%')) if len(fields)>3 else None
-    try:
-        displays=len(display.display_data()['external'])
-    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        displays=0
-    return dict(brightness=brightness,profile=backend.run('tlpctl','get'),displays=displays,
-                time_format=backend.run(str(Path.home()/'.local/bin/rice-clock'),'get') or '24h',media=mpris.options(),
-                update=update_check.status())
+    native=Path.home()/'.local/bin'
+    profile_command=native/'rice-profile-current'
+    brightness_command=native/'rice-brightness-current'
+    def available_displays():
+        try:return len(display.display_data()['external'])
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):return 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+        brightness_task=pool.submit(backend.run,str(brightness_command) if brightness_command.exists() else 'brightnessctl',
+                                    *([] if brightness_command.exists() else ['-m']))
+        profile_task=pool.submit(backend.run,str(profile_command) if profile_command.exists() else 'tlpctl',
+                                 *([] if profile_command.exists() else ['get']))
+        displays_task=pool.submit(available_displays)
+        value=brightness_task.result()
+        if not brightness_command.exists():value=value.split(',')[3].rstrip('%') if len(value.split(','))>3 else ''
+        brightness=int(value) if value.isdigit() else None
+        return dict(brightness=brightness,profile=profile_task.result(),displays=displays_task.result(),
+                    time_format=backend.run(str(native/'rice-clock'),'get') or '24h',media=mpris.options(),
+                    update=update_check.status())
 
 
 def media_data():
@@ -362,6 +371,7 @@ class Panel(Gtk.ApplicationWindow):
         for child in self.body.get_children():child.destroy()
 
     def load(self,page,remember=True):
+        same_page=page==self.page and bool(self.body.get_children())
         if remember and self.page:self.history.append(self.page)
         self.page=page
         self.generation+=1
@@ -370,12 +380,13 @@ class Panel(Gtk.ApplicationWindow):
         self.back.set_visible(bool(self.history))
         self.refresh.set_visible(page not in ('power','confirm'))
         self.feedback.hide()
-        self.reset_body()
-        self.body.pack_start(self.label('Loading…','subtitle'),False,False,0)
-        self.body.show_all()
+        if not same_page:
+            self.reset_body()
+            self.body.pack_start(self.label('Loading…','subtitle'),False,False,0)
+            self.body.show_all()
         loaders={'audio':sound_data,'network':wifi_data,'nearby':wifi_data,'bluetooth':bluetooth_data,'display':display.display_data,'settings':settings_data,'code':CODE['recent_projects'],'media':media_data}
         if page=='power':self.render_power();return
-        self.work(loaders[page],done=lambda data:self.render(page,data))
+        self.work(loaders[page],done=lambda data:self.render(page,data),busy=not same_page)
 
     def go_back(self):
         if self.history:self.load(self.history.pop(),remember=False)
@@ -542,68 +553,100 @@ class Panel(Gtk.ApplicationWindow):
 
     def render_settings(self,data):
         update=data.get('update') or {}
-        group=self.section('Rice update')
         waiting=update_check.pending_updates(update)
+        group=self.section('Update ready') if waiting else None
         if waiting:
-            # The row exists only while an update is still new; Ignore flips it
-            # out of sight and the update stays in Update history.
             sha,entry=waiting[0]
             detail=update_check.display_name(entry)
             if len(waiting)>1:detail=f"{len(waiting)} new updates · {detail}"
-            # Ignore sits beside Download, not inside it: one button cannot
-            # contain another, and it needs its own click target.
             holder=Gtk.Box(spacing=6)
             group.pack_start(holder,False,False,0)
             content=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             holder.pack_start(content,True,True,0)
             self.row(content,'Download update',detail,'software-update-available-symbolic',
                      lambda s=sha:self.app.open_updates(s))
-            ignore=Gtk.Button(label='Ignore')
-            ignore.get_style_context().add_class('secondary')
-            ignore.set_valign(Gtk.Align.CENTER)
-            ignore.set_tooltip_text('Hide this update · it stays in Update history')
-            ignore.connect('clicked',lambda *_,s=sha:self.work(lambda:update_check.ignore(s)))
-            holder.pack_end(ignore,False,False,0)
-        elif update.get('available'):
-            # Offline fallback: the head moved but no commit messages were read yet.
-            self.row(group,'Download update','New commits ready','software-update-available-symbolic',
-                     lambda:self.app.open_updates(update.get('sha','')))
-        elif update.get('error'):
-            self.row(group,'Update check failed',update['error'],'dialog-information-symbolic',
-                     lambda:self.work(lambda:update_check.check()))
-        else:
-            checked=update_check.ago(update.get('checked'))
-            self.row(group,'Rice is up to date',
-                     f'Last checked {checked} · check again' if checked else 'Check now · checked every 30 minutes',
-                     'view-refresh-symbolic',lambda:self.work(lambda:update_check.check()))
-        group=self.section('Clock · change this anytime')
-        choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);group.pack_start(choices,False,False,0)
-        for value,label in [('24h','24 hour · 21:30'),('12h','12 hour · 09:30 PM')]:
-            self.action_button(choices,label,lambda v=value:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-clock'),'set',v,check=True)),primary=data['time_format']==value)
+            if entry.get('kind')!='mandatory':
+                ignore=Gtk.Button(label='Ignore')
+                ignore.get_style_context().add_class('secondary')
+                ignore.set_valign(Gtk.Align.CENTER)
+                ignore.set_tooltip_text('Hide this update · it stays in Update history')
+                ignore.connect('clicked',lambda *_,s=sha:self.work(lambda:update_check.ignore(s)))
+                holder.pack_end(ignore,False,False,0)
+        group=self.section('Quick controls')
+        for name,detail,icon,page in [('Sound','Volume and outputs','audio-volume-high-symbolic','audio'),
+                                      ('Wi-Fi','Networks and connection','network-wireless-symbolic','network'),
+                                      ('Bluetooth','Devices and pairing','bluetooth-symbolic','bluetooth'),
+                                      ('Media','Playback and sources','media-playback-start-symbolic','media')]:
+            self.row(group,name,detail,icon,lambda p=page:self.load(p))
+        if data['displays']:
+            self.row(group,'Displays',f"{data['displays']} external display{'s' if data['displays'] != 1 else ''} connected",
+                     'video-display-symbolic',lambda:self.load('display'))
         if data['brightness'] is not None:
-            group=self.section('Display')
+            group=self.section('Brightness')
             self.slider(group,'Brightness',data['brightness'],100,lambda v:backend.run('brightnessctl','set',f'{v}%',check=True),'display-brightness-symbolic')
         power=self.section('Power mode')
         choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);power.pack_start(choices,False,False,0)
+        profile_buttons={}
+        def choose_profile(profile):
+            command={'power-saver':'rice-profile-saver','balanced':'rice-profile-balanced',
+                     'performance':'rice-profile-fast'}[profile]
+            native=Path.home()/'.local/bin'/command
+            action=(lambda:backend.run(str(native),check=True)) if native.exists() else (
+                lambda:backend.run('tlpctl','set',profile,check=True))
+            def selected(_):
+                for value,button in profile_buttons.items():
+                    style=button.get_style_context()
+                    style.remove_class('primary' if value!=profile else 'secondary')
+                    style.add_class('primary' if value==profile else 'secondary')
+            self.work(action,done=selected,refresh=False,busy=False)
         for label,profile in [('Saver','power-saver'),('Balanced','balanced'),('Fast','performance')]:
-            self.action_button(choices,label,lambda p=profile:self.work(lambda:backend.run('tlpctl','set',p,check=True)),primary=data['profile']==profile)
+            profile_buttons[profile]=self.action_button(choices,label,lambda p=profile:choose_profile(p),
+                                                        primary=data['profile']==profile)
+        group=self.section('Clock')
+        choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);group.pack_start(choices,False,False,0)
+        clock_buttons={}
+        def choose_clock(value):
+            native=Path.home()/'.local/bin'/('rice-clock-12' if value=='12h' else 'rice-clock-24')
+            action=(lambda:backend.run(str(native),check=True)) if native.exists() else (
+                lambda:backend.run(str(Path.home()/'.local/bin/rice-clock'),'set',value,check=True))
+            def selected(_):
+                for name,button in clock_buttons.items():
+                    style=button.get_style_context()
+                    style.remove_class('primary' if name!=value else 'secondary')
+                    style.add_class('primary' if name==value else 'secondary')
+            self.work(action,done=selected,refresh=False,busy=False)
+        for value,label in [('24h','24 hour'),('12h','12 hour')]:
+            clock_buttons[value]=self.action_button(choices,label,lambda v=value:choose_clock(v),
+                                                     primary=data['time_format']==value)
         media=self.section('Media sources')
         for key,label,detail in [('desktop_spotify','Spotify app','Show its playback controls while open'),
                                  ('browser_media','Browser players','Spotify Web, SoundCloud, YouTube Music and other MPRIS sites')]:
             self.switch_row(media,label,detail,bool(data['media'].get(key,False)),
-                lambda state,k=key:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-media'),'set',k,'on' if state else 'off',check=True)),
+                lambda state,k=key:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-media'),'set',k,'on' if state else 'off',check=True),
+                                              refresh=False,busy=False),
                 'audio-x-generic-symbolic')
-        group=self.section('Quick controls')
-        for name,detail,icon,page in [('Sound','Volume and output devices','audio-volume-high-symbolic','audio'),('Wi-Fi','Networks and connection','network-wireless-symbolic','network'),('Bluetooth','Headphones and other devices','bluetooth-symbolic','bluetooth')]:
-            self.row(group,name,detail,icon,lambda p=page:self.load(p))
-        self.row(group,'Media','Playback and source controls','media-playback-start-symbolic',lambda:self.load('media'))
-        if data['displays']:
-            self.row(group,'Displays',f"{data['displays']} external display{'s' if data['displays'] != 1 else ''} connected",'video-display-symbolic',lambda:self.load('display'))
-        self.row(self.body,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',lambda:self.launch(['kitty','btop']))
-        self.row(self.body,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',lambda:self.launch(['code',str(Path.home()/'.local/share/rice/source')]))
-        self.row(self.body,'Share an idea','Suggest a feature or improvement on GitHub','chat-message-new-symbolic',lambda:self.open_url(update_check.ISSUES))
-        # Bottom of Settings: the full history lives in a centered overlay.
-        self.row(self.body,'Update history','Every update · new, old and ignored','document-open-recent-symbolic',lambda:self.app.open_updates())
+        group=self.section('Rice')
+        if not waiting:
+            if update.get('available'):
+                self.row(group,'Download update','New commits ready','software-update-available-symbolic',
+                         lambda:self.app.open_updates(update.get('sha','')))
+            elif update.get('error'):
+                self.row(group,'Update check failed',update['error'],'dialog-information-symbolic',
+                         lambda:self.work(lambda:update_check.check()))
+            else:
+                checked=update_check.ago(update.get('checked'))
+                self.row(group,'Rice is up to date',
+                         f'Last checked {checked} · check again' if checked else 'Check now · checked every 30 minutes',
+                         'view-refresh-symbolic',lambda:self.work(lambda:update_check.check()))
+        self.row(group,'Update history','Every update · new, old and ignored','document-open-recent-symbolic',
+                 lambda:self.app.open_updates())
+        group=self.section('More')
+        self.row(group,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',
+                 lambda:self.launch(['kitty','btop']))
+        self.row(group,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',
+                 lambda:self.launch(['code',str(Path.home()/'.local/share/rice/source')]))
+        self.row(group,'Share an idea','Suggest an improvement on GitHub','chat-message-new-symbolic',
+                 lambda:self.open_url(update_check.ISSUES))
 
     def open_url(self,url):
         try:
@@ -777,7 +820,7 @@ class UpdatesOverlay(Gtk.Window):
         self.feedback.hide()
 
     def history(self):
-        """Every known update, newest first, with its (optional)/(recommended) tag."""
+        """Every known update, newest first, with its priority tag."""
         self.reset()
         self.scroller.set_min_content_height(400)
         self.heading.set_text('Update history')
@@ -787,7 +830,7 @@ class UpdatesOverlay(Gtk.Window):
         if not entries:
             self.body.pack_start(make_label('No updates recorded yet','subtitle'),False,False,0)
         for sha,entry in entries:
-            tag='(optional)' if entry.get('kind')=='optional' else '(recommended)'
+            tag='('+entry.get('kind','recommended')+')'
             if entry.get('applied'):status='applied '+update_check.ago(entry['applied'])
             elif entry.get('new'):status='new · waiting under Download update'
             else:status='ignored · still downloadable'
@@ -805,7 +848,7 @@ class UpdatesOverlay(Gtk.Window):
         state=update_check.status()
         entry=dict(state['updates'].get(sha) or {})
         summary=update_check.display_name(entry) if entry else (state.get('subject') or '').strip() or 'Rice update'
-        tag='(optional)' if entry.get('kind')=='optional' else '(recommended)'
+        tag='('+entry.get('kind','recommended')+')'
         self.heading.set_text('Update details')
         self.back.show()
         meta=tag+(f' · {entry.get("id") or sha}' if sha else '')
@@ -903,6 +946,11 @@ class App(Gtk.Application):
 
     def do_command_line(self,cmd):
         args=cmd.get_arguments();page=args[1] if len(args)>1 else 'settings'
+        if page.startswith('updates:'):
+            sha=page.partition(':')[2]
+            if len(sha)==12 and all(c in '0123456789abcdefABCDEF' for c in sha):
+                self.open_updates(sha);return 0
+            return 1
         if page=='--daemon':
             self.hold()
             return 0

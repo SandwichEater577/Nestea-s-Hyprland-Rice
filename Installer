@@ -18,16 +18,31 @@ Nestea's Rice for Hyprland
   ./Installer             interactive setup
   ./Installer --check     show readiness and missing programs
   ./Installer --install   install or refresh without the menu
-  ./Installer --deps      review optional Arch packages
+  ./Installer --deps      review Arch dependencies
+  ./Installer --uninstall ask for feedback, then restore the previous desktop
 
 Clock format can also be changed in the live settings menu.
 EOF
 }
 
 check() {
-    local programs=(Hyprland quickshell lua python3 nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq)
+    local programs=(Hyprland quickshell lua python3 git nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq g++ pkg-config brightnessctl notify-send zenity wl-paste cliphist hypridle hyprlock xdg-open fastfetch btop code)
     local missing=() item net bt audio
     for item in "${programs[@]}"; do command -v "$item" >/dev/null || missing+=("$item"); done
+    if command -v pkg-config >/dev/null && ! pkg-config --exists Qt6Core Qt6DBus Qt6Concurrent; then
+        missing+=("Qt6Core/Qt6DBus/Qt6Concurrent development files")
+    fi
+    if ! python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("GtkLayerShell", "0.1"); from gi.repository import Gtk, GtkLayerShell' >/dev/null 2>&1; then
+        missing+=("Python GTK 3 and GtkLayerShell bindings")
+    fi
+    if command -v pacman >/dev/null && ! pacman -Qq tlp-pd >/dev/null 2>&1 &&
+       ! pacman -Qq power-profiles-daemon >/dev/null 2>&1 &&
+       ! pacman -Qq tuned-ppd >/dev/null 2>&1; then
+        missing+=("power profile D-Bus provider")
+    fi
+    if [[ ${RICE_DESKTOP_SPOTIFY:-no} == yes ]] && ! command -v spotify-launcher >/dev/null; then
+        missing+=("spotify-launcher")
+    fi
     net=$(systemctl is-active NetworkManager 2>/dev/null || true)
     bt=$(systemctl is-active bluetooth 2>/dev/null || true)
     audio=$(systemctl --user is-active pipewire 2>/dev/null || true)
@@ -45,8 +60,15 @@ check() {
 deps() {
     command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
     local packages=(hyprland quickshell gtk3 gtk-layer-shell imagemagick lua python python-gobject
+                    gcc pkgconf qt6-base qt6-declarative git
                     networkmanager bluez bluez-utils playerctl brightnessctl rofi kitty thunar hyprpaper
-                    mako tlp libnotify pipewire-pulse jq)
+                    mako libnotify pipewire-pulse jq zenity wl-clipboard cliphist hypridle hyprlock
+                    hyprpolkitagent xdg-utils fastfetch btop code)
+    if [[ ${RICE_DESKTOP_SPOTIFY:-no} == yes ]]; then packages+=(spotify-launcher); fi
+    if ! pacman -Qq tlp-pd >/dev/null 2>&1 && ! pacman -Qq power-profiles-daemon >/dev/null 2>&1 &&
+       ! pacman -Qq tuned-ppd >/dev/null 2>&1; then
+        packages+=(power-profiles-daemon)
+    fi
     printf 'Arch packages: %s\n' "${packages[*]}"
     if [[ ${1:-} == --dry-run ]]; then
         printf 'Preview only: no packages or services will be changed.\n'
@@ -58,6 +80,9 @@ deps() {
         [[ $answer == [yY] ]] || return 0
     fi
     sudo pacman -S --needed "${packages[@]}"
+    if pacman -Qq power-profiles-daemon >/dev/null 2>&1; then
+        sudo systemctl enable --now power-profiles-daemon.service
+    fi
     if ! systemctl is-active --quiet NetworkManager || ! systemctl is-active --quiet bluetooth; then
         read -r -p 'Enable NetworkManager and Bluetooth now? [y/N] ' answer
         [[ $answer != [yY] ]] || sudo systemctl enable --now NetworkManager bluetooth
@@ -128,6 +153,12 @@ spin() {
 
 run_core() {
     local log pid status=0
+    if [[ -n ${WAYLAND_DISPLAY:-} ]] && python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("GtkLayerShell", "0.1"); from gi.repository import Gtk, GtkLayerShell' >/dev/null 2>&1; then
+        python3 "$repo/src/bin/rice-install-progress" "$core" || status=$?
+        if ((status)); then warn "Install stopped (exit $status)"; return "$status"; fi
+        ok 'Rice installed and services refreshed'
+        return 0
+    fi
     log=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/rice-installer.XXXXXX")
     "$core" >"$log" 2>&1 & pid=$!
     spin "$pid" 'Installing rice'
@@ -141,7 +172,7 @@ run_core() {
 interactive() {
     [[ $interactive_tty == true ]] || { echo 'Interactive setup needs a terminal. Use --check, --install or --help.' >&2; return 2; }
     trap restore_cursor EXIT
-    local clock desktop browser scale wifi bt packages answer current
+    local clock desktop browser scale wifi bt packages telemetry answer current
     printf '\n%s┌──────────────────────────────────────────────────────┐%s\n' "$violet" "$reset"
     printf '%s│%s  %sNestea’s Rice for Hyprland%s   %s/ setup%s                %s│%s\n' "$violet" "$reset" "$white" "$reset" "$dim" "$reset" "$violet" "$reset"
     printf '%s└──────────────────────────────────────────────────────┘%s\n' "$violet" "$reset"
@@ -150,32 +181,35 @@ interactive() {
 
     current=24h
     if [[ -f $HOME/.config/rice/settings.json ]] && grep -Eq '"time_format"[[:space:]]*:[[:space:]]*"12h"' "$HOME/.config/rice/settings.json"; then current=12h; fi
-    clock=$(choose '01 / 07  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
+    clock=$(choose '01 / 08  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
         "$([[ $current == 12h ]] && printf 1 || printf 0)" \
         24h '24-hour time   [21:30:45]' 12h '12-hour time   [09:30:45 PM]') || return 0
 
     current=true
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"desktop_spotify"[[:space:]]*:[[:space:]]*false' "$HOME/.config/rice/Media-Options.json"; then current=false; fi
-    desktop=$(choose '02 / 07  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
+    desktop=$(choose '02 / 08  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, enable desktop Spotify' no 'No, keep it hidden') || return 0
 
     current=false
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"browser_media"[[:space:]]*:[[:space:]]*true' "$HOME/.config/rice/Media-Options.json"; then current=true; fi
-    browser=$(choose '03 / 07  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
+    browser=$(choose '03 / 08  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, include browser players' no 'No, desktop players only') || return 0
 
     current=$(cat "$HOME/.config/rice/display-device.tsv" 2>/dev/null || printf 'auto\t1.0')
-    scale=$(choose '04 / 07  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
+    scale=$(choose '04 / 08  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
         0 keep 'Keep current scale' 1.0 '100%  [compact]' 1.25 '125%  [balanced]' 1.5 '150%  [larger]') || return 0
 
-    wifi=$(choose '05 / 07  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
+    wifi=$(choose '05 / 08  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
         0 later 'Later, use the live network menu' now 'Yes, open NetworkManager') || return 0
 
-    bt=$(choose '06 / 07  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
+    bt=$(choose '06 / 08  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
         0 later 'Later, use the live Bluetooth menu' now 'Yes, open Bluetooth tools') || return 0
 
-    packages=$(choose '07 / 07  Install optional Arch packages?' 'Review the package list before the final installation step.' \
-        0 no 'No, use installed packages' yes 'Yes, install missing dependencies') || return 0
+    packages=$(choose '07 / 08  Install Arch dependencies?' 'Required programs must be present before the rice can be installed.' \
+        0 yes 'Yes, install required dependencies' no 'No, use installed packages') || return 0
+
+    telemetry=$(choose '08 / 08  Count this PC as active?' 'Optional: a hashed machine ID reports at most every 4 hours; expires after 30 days.' \
+        0 no 'No, do not report' yes 'Yes, count this PC after update checks') || return 0
 
     note 'Your setup'
     note "Clock          $clock"
@@ -185,38 +219,55 @@ interactive() {
     note "Wi-Fi          $wifi"
     note "Bluetooth      $bt"
     note "Arch packages  $packages"
+    note "Active count   $telemetry"
     note ''
-    if [[ $packages == yes ]]; then deps --dry-run; note ''; fi
+    if [[ $packages == yes ]]; then RICE_DESKTOP_SPOTIFY="$desktop" deps --dry-run; note ''; fi
 
     answer=$(choose 'Ready to install Nestea’s Rice?' 'Packages (if selected), source files, services, then your preferences.' \
         0 yes 'Install with these choices' no 'Cancel without changing anything') || return 0
     if [[ $answer != yes ]]; then ok 'Cancelled · no changes made'; return; fi
-    [[ $packages != yes ]] || deps --yes
-    if ! run_core; then return 1; fi
-    "$repo/src/bin/rice-clock" set "$clock" >/dev/null
-    "$repo/src/bin/rice-media" set desktop_spotify "$([[ $desktop == yes ]] && printf on || printf off)"
-    "$repo/src/bin/rice-media" set browser_media "$([[ $browser == yes ]] && printf on || printf off)"
-    if [[ $scale != keep ]]; then
-        current=$(cat "$HOME/.config/rice/display-device.tsv" 2>/dev/null || printf 'auto\t1.0')
-        current=${current%%$'\t'*}
-        [[ $current != auto ]] || current=$(hyprctl -j monitors 2>/dev/null | jq -r '.[0].name // empty')
-        if [[ $current =~ ^[a-zA-Z0-9_.-]+$ ]]; then
-            mkdir -p "$HOME/.config/rice"
-            printf '%s\t%s\n' "$current" "$scale" >"$HOME/.config/rice/display-device.tsv"
-            "$core" --monitors
-            [[ -z ${WAYLAND_DISPLAY:-} ]] || hyprctl reload >/dev/null
-        else warn 'Display scale needs a running Hyprland session'; fi
+    [[ $packages != yes ]] || RICE_DESKTOP_SPOTIFY="$desktop" deps --yes
+    if ! RICE_DESKTOP_SPOTIFY="$desktop" check; then
+        warn 'Required dependencies are missing. Re-run setup and choose Arch dependencies.'
+        return 1
     fi
-    ok 'Preferences applied'
+    export RICE_CLOCK="$clock" RICE_DESKTOP_SPOTIFY="$desktop" RICE_BROWSER_MEDIA="$browser" RICE_SCALE="$scale" RICE_TELEMETRY="$telemetry"
+    if ! run_core; then return 1; fi
     [[ $wifi != now ]] || nmtui
     [[ $bt != now ]] || bluetoothctl
     printf '%s└%s  Setup complete · enjoy your rice.\n' "$violet" "$reset"
 }
+
+uninstall() {
+    [[ $interactive_tty == true ]] || {
+        echo 'Uninstall needs an interactive terminal so you can review the restore.' >&2
+        return 2
+    }
+    [[ -f $HOME/.local/state/rice/pre-install/manifest ]] || {
+        warn 'No pre-install snapshot exists; there is no safe automatic restore for this older installation.'
+        return 1
+    }
+    local reason improvement answer feedback
+    reason=$(choose 'Why are you uninstalling?' 'This stays on this PC unless you choose to share it.' \
+        0 broken 'Something did not work' slow 'Performance was poor' look 'The design was not for me' other 'Another reason') || return 0
+    printf 'What should improve? (optional): ' >&2
+    IFS= read -r improvement </dev/tty || improvement=''
+    answer=$(choose 'Restore your previous desktop?' 'Stops rice services and restores files saved before the first install.' \
+        1 no 'Keep the rice' yes 'Uninstall and restore') || return 0
+    [[ $answer == yes ]] || return 0
+    feedback="$HOME/.local/state/rice/uninstall-feedback.txt"
+    mkdir -p "$(dirname "$feedback")"
+    printf 'Reason: %s\nImprove: %s\n' "$reason" "$improvement" > "$feedback"
+    chmod 600 "$feedback"
+    "$repo/src/installer/uninstall.sh"
+    ok "Feedback saved locally at $feedback"
+}
 case ${1:-} in
     --help|-h) usage ;;
     --check) check ;;
-    --install) "$core" ;;
+    --install) check && "$core" ;;
     --deps) deps ;;
+    --uninstall) uninstall ;;
     '') interactive ;;
     *) usage >&2; exit 2 ;;
 esac

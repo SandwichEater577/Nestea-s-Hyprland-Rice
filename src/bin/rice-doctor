@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Read-only diagnostics for a rice installation."""
+import json
+from pathlib import Path
+import subprocess
+
+HOME = Path.home()
+SOURCE = HOME / '.local/share/rice/source'
+BIN = HOME / '.local/bin'
+
+
+def run(*args):
+    try:
+        result = subprocess.run(args, text=True, capture_output=True, timeout=6)
+        return result.returncode, (result.stdout or result.stderr).strip()
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return 1, str(error)
+
+
+def main():
+    checks = [('Source link', SOURCE.exists()),
+              ('QuickShell source', (SOURCE / 'src/quickshell/shell.qml').is_file()),
+              ('Native actions', (BIN / 'rice-actions').is_file()),
+              ('Native status', (BIN / 'rice-status').is_file()),
+              ('Settings command', (BIN / 'rice-show-settings').exists()),
+              ('GTK panels', (HOME / '.local/lib/rice/panels.py').is_file())]
+    for title, okay in checks:
+        print(f'{"OK" if okay else "MISSING":7} {title}')
+    for unit in ('rice-bar', 'rice-controls', 'rice-update-watch', 'rice-hotspot'):
+        code, state = run('systemctl', '--user', 'is-active', unit + '.service')
+        print(f'{"OK" if code == 0 else "CHECK":7} {unit}: {state or "unknown"}')
+    code, value = run('quickshell', 'ipc', '--path',
+                      str(SOURCE / 'src/quickshell/shell.qml'), 'show')
+    print(f'{"OK" if code == 0 else "CHECK":7} QuickShell Settings IPC')
+    try:
+        update = json.loads((HOME / '.local/state/rice/update.json').read_text())
+        print('Update state:', 'error=' + str(update.get('error')) if update.get('error') else
+              'available=' + str(bool(update.get('available'))))
+    except (OSError, ValueError):
+        print('Update state: no cached check yet')
+    code, logs = run('journalctl', '--user', '-u', 'rice-bar', '-u', 'rice-controls',
+                     '-u', 'rice-update-watch', '-b', '-p', 'warning', '--no-pager', '-n', '12')
+    print('\nRecent service warnings:\n' + (logs or 'None'))
+
+
+if __name__ == '__main__':
+    main()

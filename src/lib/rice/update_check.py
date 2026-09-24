@@ -27,6 +27,7 @@ import shlex
 import subprocess
 import time
 from collections import deque
+from telemetry import maybe_check_in
 
 HOME = Path.home()
 SOURCE = HOME / '.local/share/rice/source'
@@ -37,7 +38,7 @@ PROGRESS_FILE = STATE / 'update-progress.json'
 PUBLIC = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice.git'
 ISSUES = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice/issues/new'
 CHECK_SECONDS = 1800
-KINDS = ('optional', 'recommended')
+KINDS = ('optional', 'recommended', 'mandatory')
 HISTORY = 20  # installed commits kept described in the Update history window
 TRAILER = re.compile(r'^Rice-Update-(Summary|Detail|Kind|ID):[ \t]*(.*)$')
 UPDATE_ID = re.compile(r'^0x[0-9a-fA-F]{5}$')
@@ -139,7 +140,8 @@ def pending_updates(state):
     """Entries still waiting to be downloaded, newest commit first."""
     found = [(sha, entry) for sha, entry in (state.get('updates') or {}).items()
              if entry.get('new') and not entry.get('applied')]
-    found.sort(key=lambda item: item[1].get('when') or 0, reverse=True)
+    found.sort(key=lambda item: (item[1].get('kind') == 'mandatory',
+                                 item[1].get('when') or 0), reverse=True)
     return found
 
 
@@ -198,6 +200,8 @@ def ignore(sha):
     state = status()
     entry = state['updates'].get(str(sha)[:12])
     if entry:
+        if entry.get('kind') == 'mandatory':
+            return state
         entry['new'] = False
     if not pending_updates(state):
         state['available'] = False
@@ -330,6 +334,7 @@ def _installed_revision():
 
 def check():
     """Refresh the cached state from the upstream branch."""
+    maybe_check_in()
     state = status()
     state['checked'] = time.time()
     if not (SOURCE / '.git').exists():

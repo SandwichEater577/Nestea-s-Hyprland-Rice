@@ -1,0 +1,9 @@
+#!/bin/sh
+# Session startup respects the desktop Spotify preference on every machine.
+options="$HOME/.config/rice/Media-Options.json"
+if [ -f "$options" ] && command -v jq >/dev/null 2>&1; then
+    enabled=$(jq -r '.desktop_spotify // true' "$options" 2>/dev/null)
+    [ "$enabled" = true ] || exit 0
+fi
+command -v spotify-launcher >/dev/null 2>&1 || exit 0
+exec spotify-launcher

@@ -1,5 +1,8 @@
 #!/bin/sh
 page=${1:-settings}
+case "$page" in
+    updates:*) exec python3 "$HOME/.local/lib/rice/panels.py" "$page" ;;
+esac
 if command -v gdbus >/dev/null && gdbus call --session --dest org.nestea.DesktopControls \
     --object-path /org/nestea/DesktopControls --method org.gtk.Actions.Activate \
     "$page" '[]' '{}' >/dev/null 2>&1; then

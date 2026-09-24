@@ -4,6 +4,8 @@ repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
 dry=${1:-}
 [[ -z $dry || $dry == --dry-run || $dry == --monitors ]] || { echo 'usage: install.sh [--dry-run|--monitors]' >&2; exit 2; }
 source "$repo/src/installer/monitors.sh"
+source "$repo/src/installer/paths.sh"
+source "$repo/src/installer/state.sh"
 if [[ $dry == --monitors ]]; then rice_monitors_generate; exit 0; fi
 
 step() {
@@ -14,11 +16,53 @@ step() {
 }
 plan() { if [[ $dry == --dry-run ]]; then printf '  would %s\n' "$*"; return 0; fi; }
 
+step 0 'Checking and compiling native programs'
+plan 'verify runtime and compile both C++ programs before changing any user files'
+build_dir=''
+if [[ $dry != --dry-run ]]; then
+    if [[ $repo == "$HOME/.local/share/rice/source" ]]; then
+        echo 'Move the checkout outside ~/.local/share/rice/source before installing.' >&2
+        exit 1
+    fi
+    command -v g++ >/dev/null && command -v pkg-config >/dev/null && \
+        pkg-config --exists Qt6Core Qt6DBus Qt6Concurrent || {
+        echo 'Missing C++/Qt 6 build dependencies. Run ./Installer --deps.' >&2; exit 1;
+    }
+    command -v quickshell >/dev/null && command -v lua >/dev/null && \
+        python3 -c 'import gi; gi.require_version("Gtk", "3.0"); gi.require_version("GtkLayerShell", "0.1"); from gi.repository import Gtk, GtkLayerShell' || {
+        echo 'Missing QuickShell, Lua, or GTK panel dependencies. Run ./Installer --deps.' >&2; exit 1;
+    }
+    build_dir=$(mktemp -d "${TMPDIR:-/tmp}/rice-build.XXXXXXXX")
+    trap '[[ -z $build_dir ]] || rm -rf -- "$build_dir"' EXIT
+    cxx_flags=$(pkg-config --cflags Qt6Core Qt6DBus Qt6Concurrent)
+    cxx_libs=$(pkg-config --libs Qt6Core Qt6DBus Qt6Concurrent)
+    read -r -a cxx_include <<< "$cxx_flags"
+    read -r -a cxx_link <<< "$cxx_libs"
+    for name in rice-actions rice-status; do
+        printf 'Compiling %s\n' "$name"
+        g++ -std=c++17 -O2 -fPIC "${cxx_include[@]}" "$repo/src/native/$name.cpp" \
+            -o "$build_dir/$name" "${cxx_link[@]}"
+    done
+    if [[ -x /usr/lib/qt6/bin/qmlformat ]]; then
+        /usr/lib/qt6/bin/qmlformat "$repo/src/quickshell/shell.qml" >/dev/null
+        /usr/lib/qt6/bin/qmlformat "$repo/src/quickshell/SettingsPanel.qml" >/dev/null
+    fi
+    rice_backup_originals
+fi
+
 step 1 'Source and private settings'
 plan 'link this repository as ~/.local/share/rice/source'
 if [[ $dry != --dry-run ]]; then
     mkdir -p "$HOME/.local/share/rice" "$HOME/.config/rice" "$HOME/.local/state/rice"
-    ln -sfn "$repo" "$HOME/.local/share/rice/source"
+    source_target="$HOME/.local/share/rice/source"
+    if [[ -d $source_target && ! -L $source_target ]]; then
+        if [[ $repo == "$source_target" ]]; then
+            echo 'Move the checkout outside ~/.local/share/rice/source before installing.' >&2
+            exit 1
+        fi
+        mv -- "$source_target" "$HOME/.local/state/rice/pre-install/source-directory"
+    fi
+    ln -sfnT "$repo" "$source_target"
     for name in WiFi Bluetooth Media; do
         if [[ ! -e $HOME/.config/rice/${name}-Options.json ]]; then
             install -m 600 "$repo/${name}-Options.example.json" "$HOME/.config/rice/${name}-Options.json"
@@ -27,16 +71,40 @@ if [[ $dry != --dry-run ]]; then
     if [[ ! -e $HOME/.config/rice/settings.json ]]; then
         "$repo/src/bin/rice-clock" set 24h >/dev/null
     fi
+    if [[ -n ${RICE_CLOCK:-} ]]; then "$repo/src/bin/rice-clock" set "$RICE_CLOCK" >/dev/null; fi
+    if [[ -n ${RICE_DESKTOP_SPOTIFY:-} ]]; then
+        "$repo/src/bin/rice-media" set desktop_spotify "$([[ $RICE_DESKTOP_SPOTIFY == yes ]] && printf on || printf off)"
+    fi
+    if [[ -n ${RICE_BROWSER_MEDIA:-} ]]; then
+        "$repo/src/bin/rice-media" set browser_media "$([[ $RICE_BROWSER_MEDIA == yes ]] && printf on || printf off)"
+    fi
+    if [[ -n ${RICE_TELEMETRY:-} ]]; then
+        if [[ $RICE_TELEMETRY == yes ]]; then
+            printf '{"enabled": true}\n' > "$HOME/.config/rice/telemetry.json"
+        else
+            printf '{"enabled": false}\n' > "$HOME/.config/rice/telemetry.json"
+        fi
+        chmod 600 "$HOME/.config/rice/telemetry.json"
+    fi
     for file in private.json.enc display-layout.tsv; do
         if [[ -f $repo/data/$file && ! -e $HOME/.config/rice/$file ]]; then
             install -m 600 "$repo/data/$file" "$HOME/.config/rice/$file"
         fi
     done
     rice_monitors_generate
+    if [[ ${RICE_SCALE:-keep} != keep ]]; then
+        primary=$(cut -f1 "$HOME/.config/rice/display-device.tsv" 2>/dev/null || true)
+        if [[ $primary =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+            printf '%s\t%s\n' "$primary" "$RICE_SCALE" > "$HOME/.config/rice/display-device.tsv"
+            rice_monitors_generate
+            [[ -z ${WAYLAND_DISPLAY:-} ]] || hyprctl reload >/dev/null
+        else echo 'No active monitor found; display scale was not changed.' >&2; fi
+    fi
 fi
 
 step 2 'Programs and config generation'
 plan 'copy curated helpers to ~/.local/bin and ~/.local/lib/rice'
+plan 'compile C++ status and action handlers and link direct action commands'
 plan 'generate Kitty, Rofi, Hyprland companions and other configs from Lua'
 if [[ $dry != --dry-run ]]; then
     mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/rice" \
@@ -45,7 +113,12 @@ if [[ $dry != --dry-run ]]; then
              "$HOME/.config/cava" "$HOME/.config/rofi"
     find "$repo/src/bin" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/bin" {} +
     find "$repo/src/lib/rice" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/lib/rice" {} +
-    chmod +x "$HOME/.local/bin/"*
+    for name in rice-actions rice-status; do
+        cp -- "$build_dir/$name" "$HOME/.local/bin/$name.new"
+        chmod 755 "$HOME/.local/bin/$name.new"
+        mv "$HOME/.local/bin/$name.new" "$HOME/.local/bin/$name"
+    done
+    for name in "${RICE_ACTIONS[@]}"; do ln -sfn rice-actions "$HOME/.local/bin/$name"; done
     for name in build-rice-bar start-waybar ui-backend waybar-spotify rice-media-watch; do
         [[ ! -f $HOME/.local/bin/$name ]] || unlink "$HOME/.local/bin/$name"
     done
@@ -83,11 +156,28 @@ if [[ $dry != --dry-run ]]; then
     systemctl --user daemon-reload
     systemctl --user enable rice-bar.service rice-controls.service rice-hotspot.service rice-update-watch.service
     systemctl --user restart rice-update-watch.service
-    if [[ -n ${WAYLAND_DISPLAY:-} ]]; then systemctl --user restart rice-controls.service; fi
+    if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
+        systemctl --user restart rice-controls.service
+        sleep 0.3
+        if ! systemctl --user is-active --quiet rice-controls.service; then
+            echo 'GTK controls failed to start; check journalctl --user -u rice-controls -b.' >&2
+            exit 1
+        fi
+    fi
     systemctl --user restart rice-hotspot.service
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
-        "$HOME/.local/bin/start-bar"
+        # Handoff only after the new bar has been built and its source deployed.
+        rice_stop_old_waybar
+        systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE DISPLAY
         systemctl --user restart rice-bar.service
+        sleep 0.5
+        if ! systemctl --user is-active --quiet rice-bar.service || \
+           ! quickshell ipc --path "$HOME/.local/share/rice/source/src/quickshell/shell.qml" show >/dev/null 2>&1; then
+            systemctl --user stop rice-bar.service || true
+            rice_restore_old_waybar handoff
+            echo 'New QuickShell bar failed to load; restored the previous Waybar.' >&2
+            exit 1
+        fi
     fi
     if revision=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null); then
         printf '%s\n' "$revision" > "$HOME/.local/state/rice/installed-revision.tmp"

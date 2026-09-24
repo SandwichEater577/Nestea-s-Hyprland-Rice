@@ -31,6 +31,15 @@ ShellRoot {
     property int activeWorkspace: 0
     property var visibleWorkspaces: [1, 2, 3, 4, 5]
     property var workspaceAttention: []
+    property bool nativeReady: false
+    property bool settingsOpen: false
+    property var settingsScreen: Quickshell.screens[0]
+    IpcHandler {
+        target: "settings"
+        function toggle(): void { root.settingsOpen = !root.settingsOpen }
+        function open(): void { root.settingsOpen = true }
+        function close(): void { root.settingsOpen = false }
+    }
 
     function applyState(line) {
         if (!line || line.charAt(0) !== "{") return
@@ -58,6 +67,15 @@ ShellRoot {
     function action(args) {
         Quickshell.execDetached(args)
         Quickshell.execDetached(["touch", kickPath])   // watcher re-reads within ~100ms
+    }
+    function runNative(name, fallback) {
+        if (nativeReady) Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/" + name])
+        else action(fallback)
+    }
+    Process {
+        command: ["test", "-x", Quickshell.env("HOME") + "/.local/bin/rice-actions"]
+        running: true
+        onExited: (code) => root.nativeReady = code === 0
     }
 
     FileView {
@@ -88,7 +106,7 @@ ShellRoot {
     }
     Process {
         id: statusStream
-        command: [Quickshell.env("HOME") + "/.local/bin/bar-status", "--watch"]
+        command: ["sh", "-c", "if [ -x \"$HOME/.local/bin/rice-status\" ]; then exec \"$HOME/.local/bin/rice-status\" --watch; else exec \"$HOME/.local/bin/bar-status\" --watch; fi"]
         running: true
         stdout: SplitParser {
             onRead: data => root.applyState(data)
@@ -156,18 +174,18 @@ ShellRoot {
                     }
                     BarButton {
                         label: root.audio; hint: root.audio_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette
-                        onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio"] : [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", button === Qt.MiddleButton ? "boost" : "mute"])
-                        onWheeled: delta => root.action([Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", delta > 0 ? "up" : "down"])
+                        onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-audio" : button === Qt.MiddleButton ? "rice-audio-boost" : "rice-audio-mute", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio"] : [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", button === Qt.MiddleButton ? "boost" : "mute"])
+                        onWheeled: delta => root.runNative(delta > 0 ? "rice-audio-up" : "rice-audio-down", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", delta > 0 ? "up" : "down"])
                     }
                     Item {
                         id: albumCover
                         visible: root.spotify_running && root.cover !== ""
                         width: 24; height: 24
-                        Image { anchors.fill: parent; source: root.cover !== "" ? "file://" + root.cover : ""; asynchronous: true; fillMode: Image.PreserveAspectFit; sourceSize.width: 24; sourceSize.height: 24 }
+                        Image { anchors.fill: parent; source: root.cover !== "" ? (root.cover.indexOf("://") !== -1 ? root.cover : "file://" + root.cover) : ""; asynchronous: true; fillMode: Image.PreserveAspectFit; sourceSize.width: 24; sourceSize.height: 24 }
                         MouseArea {
                             id: albumPointer
                             anchors.fill: parent; hoverEnabled: true
-                            onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"])
+                            onClicked: root.runNative("rice-show-media", [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"])
                             onContainsMouseChanged: {
                                 if (containsMouse)
                                     albumDelay.restart()
@@ -215,11 +233,11 @@ ShellRoot {
                             }
                         }
                     }
-                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: root.shuffle_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "shuffle"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒮"; hint: "Previous track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "previous"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: root.spotify; hint: "Play / pause"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "toggle"]); onWheeled: delta => root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", delta > 0 ? "up" : "down"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒭"; hint: "Next track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "next"]) }
-                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: root.repeat_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "repeat"]) }
+                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: root.shuffle_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-media" : "rice-media-shuffle", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "shuffle"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒮"; hint: "Previous track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-previous", [Quickshell.env("HOME") + "/.local/bin/rice-media", "previous"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: 24; label: root.spotify; hint: "Play / pause"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-media" : "rice-media-toggle", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "toggle"]); onWheeled: delta => root.runNative(delta > 0 ? "rice-media-up" : "rice-media-down", [Quickshell.env("HOME") + "/.local/bin/rice-media", delta > 0 ? "up" : "down"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒭"; hint: "Next track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-next", [Quickshell.env("HOME") + "/.local/bin/rice-media", "next"]) }
+                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: root.repeat_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-repeat", [Quickshell.env("HOME") + "/.local/bin/rice-media", "repeat"]) }
                 }
             }
             Rectangle {
@@ -249,10 +267,12 @@ ShellRoot {
                             ink: active ? root.palette.accent_foreground : attention ? root.palette.accent : root.palette.muted
                             activeColor: root.palette.accent
                             hoverColor: root.palette.hover; pal: root.palette
-                            // Hyprland ≥0.56 evaluates dispatchers as Lua:
-                            // "hl.dsp.focus" is the working form here (plain
-                            // "workspace N" errors with a parse exception).
-                            onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + modelData + "})")
+                            // The native handler uses Hyprland's Lua dispatcher.
+                            onClicked: {
+                                if (root.nativeReady)
+                                    Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/rice-workspace-focus", String(modelData)])
+                                else Hyprland.dispatch("hl.dsp.focus({workspace=" + modelData + "})")
+                            }
                         }
                     }
                 }
@@ -271,16 +291,26 @@ ShellRoot {
                 Row {
                     id: rightRow
                     anchors.centerIn: parent
-                    BarButton { label: "󰨞"; hint: "VS Code · middle click: folder · right click: focus"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.MiddleButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "folder"] : button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "focus"] : [Quickshell.env("HOME") + "/.local/bin/vscode-menu"]) }
-                    BarButton { label: ""; hint: "Terminal"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action(["kitty"]) }
-                    BarButton { label: ""; hint: "Files"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action(["thunar"]) }
-                    BarButton { visible: root.display !== ""; label: root.display; hint: root.display_tooltip || "Displays"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-panel", "display"]) }
-                    BarButton { visible: root.bluetooth !== ""; label: root.bluetooth; hint: "Bluetooth devices"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-menu", "bluetooth"]) }
-                    BarButton { label: root.network; hint: root.network_tooltip || "Networks"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-menu", "network"]) }
+                    BarButton { label: "󰨞"; hint: "VS Code · middle click: folder · right click: focus"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.MiddleButton ? "rice-vscode-folder" : button === Qt.RightButton ? "rice-vscode-focus" : "rice-vscode-menu", button === Qt.MiddleButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "folder"] : button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "focus"] : [Quickshell.env("HOME") + "/.local/bin/vscode-menu"]) }
+                    BarButton { label: ""; hint: "Terminal"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-terminal", ["kitty"]) }
+                    BarButton { label: ""; hint: "Files"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-files", ["thunar"]) }
+                    BarButton { visible: root.display !== ""; label: root.display; hint: root.display_tooltip || "Displays"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-display", [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "display"]) }
+                    BarButton { visible: root.bluetooth !== ""; label: root.bluetooth; hint: "Bluetooth devices"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-bluetooth", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "bluetooth"]) }
+                    BarButton { label: root.network; hint: root.network_tooltip || "Networks"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-network", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "network"]) }
                     BarButton { visible: root.battery !== ""; interactive: false; label: root.battery_icon + "  " + root.battery; hint: root.battery_tooltip; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
-                    BarButton { label: ""; hint: "Quick settings"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/control-menu"]) }
+                    BarButton { id: settingsButton; label: ""; hint: "Quick settings"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: {
+                        root.settingsScreen = panel.screen
+                        if (root.nativeReady) root.runNative("rice-show-settings", [])
+                        else root.settingsOpen = !root.settingsOpen
+                    } }
                     BarButton { label: ""; hint: "Power / session · triple click: shut down"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/power-click"]) }
                 }
+            }
+            SettingsPanel {
+                trigger: settingsButton
+                shown: root.settingsOpen && root.settingsScreen === panel.screen
+                nativeReady: root.nativeReady
+                onCloseRequested: root.settingsOpen = false
             }
         }
     }

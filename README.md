@@ -10,15 +10,18 @@ On Arch Linux or EndeavourOS, clone the repository, then run the terminal instal
 git clone https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice.git ~/config
 cd ~/config
 ./Installer --check
-./Installer --deps       # optional; reviews Arch packages before installing
+./Installer --deps       # reviews Arch packages before installing
 ./Installer
+./Installer --uninstall  # asks for feedback, then restores prior files
 ```
 
-The installer asks one question at a time: clock format, desktop and browser media, display scale, Wi-Fi, Bluetooth, and optional Arch packages. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. The six-dot indicator shows progress during installation. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
+The installer asks one question at a time: clock format, desktop and browser media, display scale, Wi-Fi, Bluetooth, Arch dependencies, and optional active-machine counting. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. After the final choice, a centered progress window shows local compilation, settings, wallpaper, and service stages. A terminal progress display is used outside a Wayland session. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
 
-The install links this checkout at `~/.local/share/rice/source`. Keep the checkout after installing. Edit sources in `src/`, then run `./Installer --install` to deploy them. QuickShell reads its QML from this checkout. To regenerate the remaining Lua-produced configs, use `lua src/config/apply.lua`.
+The install links this checkout at `~/.local/share/rice/source`. Keep the checkout after installing. It first checks dependencies, compiles C++ sources in a temporary directory, and saves one pre-install snapshot under `~/.local/state/rice/pre-install/`. It then deploys commands and configs and swaps out a running Waybar immediately before starting the QuickShell bar. Edit sources in `src/`, then run `./Installer --install` to deploy them. QuickShell reads its QML from this checkout. To regenerate the remaining Lua-produced configs, use `lua src/config/apply.lua`.
 
-The initial setup expects Hyprland, NetworkManager, BlueZ, PipeWire, a Wayland session, and the programs reported by `./Installer --check`. QuickShell is required for the topbar. The package step asks before invoking `sudo pacman` and does not install hardware drivers or change the kernel.
+`./Installer --uninstall` asks why you are leaving and what should improve, saves that feedback **only on your PC** in `~/.local/state/rice/uninstall-feedback.txt`, stops rice services, restores files from the pre-install snapshot, and brings the previous Waybar back if one was running. It does not delete the Git checkout. If an older installation has no pre-install snapshot, uninstall refuses to guess which existing files belong to you.
+
+The initial setup expects Hyprland, NetworkManager, BlueZ, PipeWire, a Wayland session, and the programs reported by `./Installer --check`. QuickShell is required for the topbar. The package step asks before invoking `sudo pacman` and does not install hardware drivers or change the kernel. Power mode buttons use the standard power-profile D-Bus service; the package step adds `power-profiles-daemon` only if no compatible provider is installed.
 
 If the readiness check reports inactive network or Bluetooth services, choose the service prompt in `./Installer --deps` or run `sudo systemctl enable --now NetworkManager bluetooth`. Log into Hyprland before the first live bar preview; the installer can still generate files from a plain terminal.
 
@@ -29,11 +32,11 @@ If the readiness check reports inactive network or Bluetooth services, choose th
 | `Installer` | Terminal setup, preferences and readiness |
 | `src/config/` | Lua sources that generate desktop configs |
 | `src/bin/`, `src/lib/` | Installed commands and shared readers |
-| `src/quickshell/` | Topbar QML and reusable button component |
+| `src/quickshell/` | Topbar and quick Settings QML |
+| `src/native/` | C++ status stream and small action commands |
 | `src/native/hyprland.conf` | Text fallback for Hyprland; the Lua config remains primary |
 | `src/data/` | Update descriptions (`updates.json`) and private-data editors |
 | `src/installer/`, `src/systemd/` | Install logic and user services |
-| `AGENTS.md` | Instructions for AI assistants adding and shipping features |
 | `wallpaper/` | Add your own PNG, JPEG or WebP images here |
 | `*-Options.example.json` | Safe templates copied to private local settings |
 
@@ -51,11 +54,13 @@ An older encrypted preference file is supported at `~/.config/rice/private.json.
 
 Use `rice-media get`, `rice-media set desktop_spotify on|off`, or `rice-media set browser_media on|off` from a terminal. The settings live in `~/.config/rice/Media-Options.json`. Browser integration depends on that browser's MPRIS support and the site providing media metadata; the installer does not add browser extensions.
 
-Audio and media changes wake the bar on PipeWire/MPRIS events. Network and Bluetooth discovery use slower background refreshes. Volume wheel steps, play/pause, and track changes are reflected without waiting for a scan cycle.
+Native actions signal the bar to refresh after a change. The C++ status readers run independently: audio refreshes every 0.75 seconds, media every 1.5 seconds, network every 3 seconds, and battery every 5 seconds. A slow network or player query does not hold up the other controls.
 
 ## Bar, clock and wallpaper
 
 QuickShell runs the topbar through `rice-bar.service` and reads `src/quickshell/shell.qml` directly from the checkout. The installer restarts that service after an update; `systemctl --user restart rice-bar.service` refreshes it manually. Bar engine selection is no longer part of setup or Settings.
+
+The gear opens a persistent QuickShell Settings card with quick controls, brightness, power mode, media sources, clock, and updates. A pending **Download update** button sits at the top. Changing a value updates its control in place, without rebuilding the menu. Device and update detail pages still use the resident GTK controls. The installer compiles `rice-status` and `rice-actions` with Qt 6, then links 51 named `rice-*` action commands to the small C++ action executable. QuickShell reads the incremental native status stream and calls these direct actions. Until the native programs are installed, the current bar uses its existing helpers. `g++`, `pkg-config`, and Qt 6 Core/DBus/Concurrent development files are required to build them. No compiled binaries are stored in the repository.
 
 The clock can be changed to 12 or 24 hour format in the installer, live Settings menu, or with `rice-clock set 12h|24h`. Its setting is in `~/.config/rice/settings.json`.
 
@@ -71,13 +76,17 @@ The installer detects the primary output in a running Hyprland session and write
 
 The installer records the last deployed commit separately from the checkout's Git HEAD. A newer commit in the source directory does not count as installed until the installer has successfully refreshed the desktop files and services.
 
-Every commit is tracked on its own in `~/.local/state/rice/update.json` under `updates`, keyed by its twelve character Git hash. New releases also have a five-digit hex ID, starting at `0x00001`, shown in the update UI. Entries contain `new`, `summary`, `detail`, `kind` (`optional` or `recommended`), `applied` and `when` fields:
+Every commit is tracked on its own in `~/.local/state/rice/update.json` under `updates`, keyed by its twelve character Git hash. New releases also have a five-digit hex ID, starting at `0x00001`, shown in the update UI. Entries contain `new`, `summary`, `detail`, `kind` (`optional`, `recommended`, or `mandatory`), `applied` and `when` fields:
 
-- **Download update** appears at the very top of the Settings menu only while some update is still new (never seen). An **Ignore** button sits beside it: it flips `new` to false, so the row disappears and the update is reachable only from **Update history** — it is never lost and never forced.
+- **Download update** appears at the top of Settings while an update is new. An **Ignore** button sits beside optional and recommended updates; it flips `new` to false while leaving the entry in history. Mandatory updates cannot be ignored, but installation still starts only after the user chooses it.
 - Clicking **Download update** closes Settings and opens a centered confirmation window with the update description. **Install** opens a persistent progress window, then starts `rice-update.service`. Git reports its actual transfer counts, and the installer reports completed stages; work with no measurable total shows activity without a made-up percentage. The window stays open until installation succeeds or fails.
-- **Update history** at the bottom of the Settings menu (below **Share an idea**) opens the same centered window listing every known update with a one line description and an `(optional)` or `(recommended)` tag. Clicking an entry opens its detail overlay; applied updates show when they landed, and ignored ones can still be downloaded from there.
+- **Update history** in the Rice section opens the same centered window listing every known update with a one line description and its priority tag. Clicking an entry opens its detail overlay; applied updates show when they landed, and ignored ones can still be downloaded from there.
 
-Descriptions and IDs come from `src/data/updates.json`, then `Rice-Update-Summary` / `Rice-Update-Detail` / `Rice-Update-Kind` / `Rice-Update-ID` commit trailers, then the commit subject itself. When nothing is new, the top row shows the last check time and re-checks on click.
+## Optional active-machine count
+
+The installer asks whether this PC may count as active. With consent, an update check sends a hash derived from `/etc/machine-id` at most once every four hours. It never sends the raw machine ID. The count service keeps only the hash and last check-in time, counts each machine once, and drops it from the active count after 30 days without a check-in. This has no effect on the rice installed on that PC. Counting is currently disabled until an HTTPS endpoint is configured in `src/data/telemetry.json`; update checks continue normally. [Server setup](src/telemetry/README.md) explains the small self-hosted counter.
+
+Descriptions and IDs come from `src/data/updates.json`, then `Rice-Update-Summary` / `Rice-Update-Detail` / `Rice-Update-Kind` / `Rice-Update-ID` commit trailers, then the commit subject itself. When nothing is new, the Rice row checks again on click.
 
 Check or apply from a terminal with `rice-update check` and `rice-update apply`. Checking uses the checkout's own remote first and falls back to the public HTTPS mirror, so a default HTTPS clone needs no credentials while an SSH remote needs a registered key. **Share an idea** at the bottom of the Settings menu opens a new issue on this repository.
 

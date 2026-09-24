@@ -56,5 +56,7 @@ entry:focus { border-color: #a0a0a0; }
 .progress-stage { background: #242424; border: 1px solid #3c3c3c; border-radius: 12px; padding: 15px; }
 .progress-stage progressbar trough { background: #3b3b3b; border: none; border-radius: 8px; min-height: 9px; }
 .progress-stage progressbar progress { background: #e0e0e0; border: none; border-radius: 8px; min-height: 9px; }
+progressbar trough { background: #3b3b3b; border: none; border-radius: 8px; min-height: 7px; }
+progressbar progress { background: #ececec; border: none; border-radius: 8px; min-height: 7px; }
 scrollbar { background: transparent; }
 scrollbar slider { background: #555555; min-width: 3px; border-radius: 4px; }

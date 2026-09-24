@@ -7,7 +7,6 @@
 !WiFi-Options.example.json
 !Bluetooth-Options.example.json
 !Media-Options.example.json
-!AGENTS.md
 !src/
 !src/**
 !wallpaper/
@@ -27,3 +26,12 @@ wallpaper/*
 **/*.pyc
 **/*.log
 **/.cache/
+dev/
+**/*.o
+**/*.so
+**/*.a
+**/*.out
+**/*.sqlite3
+**/*.db
+src/native/rice-actions
+src/native/rice-status

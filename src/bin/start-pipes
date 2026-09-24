@@ -1,0 +1,4 @@
+#!/bin/sh
+# The dashboard remains usable when the optional pipes.sh program is absent.
+command -v pipes.sh >/dev/null 2>&1 || exit 0
+exec kitty --class session-pipes --title pipes.sh pipes.sh -p 4 -f 15 -c 7

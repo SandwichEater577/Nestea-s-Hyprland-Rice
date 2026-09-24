@@ -6,7 +6,7 @@ rice_monitors_generate() {
     mkdir -p "$dir"
     if [[ ! -s $file ]] && command -v hyprctl >/dev/null && command -v jq >/dev/null; then
         IFS=$'\t' read -r output scale < <(hyprctl -j monitors 2>/dev/null | jq -r \
-            '([.[] | select(.name | test("^(eDP|LVDS|DSI)-"))] + .)[0] | [.name, .scale] | @tsv') || true
+            '([.[] | select(.name | test("^(eDP|LVDS|DSI)-"))] + .)[0] | [.name, .scale] | @tsv' 2>/dev/null) || true
         if [[ $output =~ ^[a-zA-Z0-9_.-]+$ && $scale =~ ^[0-9]+([.][0-9]+)?$ ]]; then
             printf '%s\t%s\n' "$output" "$scale" > "$file"
             chmod 600 "$file"

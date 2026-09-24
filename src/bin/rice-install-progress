@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Visible first-install progress; the installer still owns all deployment work."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('GtkLayerShell', '0.1')
+from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
+
+
+class InstallWindow(Gtk.Window):
+    def __init__(self, command):
+        super().__init__(title="Installing Nestea's Hyprland Rice")
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        self.set_visual(self.get_screen().get_rgba_visual())
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_namespace(self, 'rice-first-install')
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        self.finished = False
+        self.stage = 0
+        self.exit_code = 1
+        self.buffer = b''
+        self.recent = []
+        self.connect('delete-event', lambda *_: not self.finished)
+
+        card = Gtk.EventBox()
+        card.set_name('panel')
+        card.set_size_request(460, -1)
+        self.add(card)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=15)
+        body.set_border_width(24)
+        card.add(body)
+        title = Gtk.Label(label="Installing Nestea's Hyprland Rice", xalign=0)
+        title.get_style_context().add_class('title')
+        body.pack_start(title, False, False, 0)
+        subtitle = Gtk.Label(label='Preparing this PC', xalign=0)
+        subtitle.get_style_context().add_class('subtitle')
+        body.pack_start(subtitle, False, False, 0)
+        self.bar = Gtk.ProgressBar()
+        body.pack_start(self.bar, False, False, 0)
+        self.task = Gtk.Label(label='Checking dependencies', xalign=0)
+        self.task.get_style_context().add_class('row-title')
+        body.pack_start(self.task, False, False, 0)
+        self.detail = Gtk.Label(label='Building programs locally from source', xalign=0)
+        self.detail.set_line_wrap(True)
+        self.detail.get_style_context().add_class('subtitle')
+        body.pack_start(self.detail, False, False, 0)
+        self.stages = []
+        for name in ('Check and compile', 'Prepare settings', 'Install native actions',
+                     'Restore wallpaper', 'Start services', 'Finish'):
+            line = Gtk.Box(spacing=12)
+            marker = Gtk.Label(label='○', xalign=0)
+            marker.set_size_request(18, -1)
+            line.pack_start(marker, False, False, 0)
+            description = Gtk.Label(label=name, xalign=0)
+            line.pack_start(description, True, True, 0)
+            state = Gtk.Label(label='Waiting', xalign=1)
+            state.get_style_context().add_class('subtitle')
+            line.pack_end(state, False, False, 0)
+            body.pack_start(line, False, False, 0)
+            self.stages.append((marker, state))
+        self.close_button = Gtk.Button(label='Close')
+        self.close_button.get_style_context().add_class('secondary')
+        self.close_button.connect('clicked', lambda *_: self.destroy())
+        body.pack_start(self.close_button, False, False, 0)
+        self.show_all()
+        self.close_button.hide()
+
+        env = dict(os.environ, RICE_UPDATE_PROGRESS='1')
+        self.child = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, env=env)
+        GLib.io_add_watch(self.child.stdout.fileno(), GLib.IO_IN | GLib.IO_HUP,
+                          self.read_output)
+        GLib.timeout_add(90, self.pulse)
+
+    def accept(self, line):
+        if not line:
+            return
+        self.recent.append(line)
+        self.recent = self.recent[-12:]
+        if line.startswith('RICE_PROGRESS_STEP='):
+            head, _, title = line.partition('\t')
+            try:
+                step = int(head.partition('=')[2])
+            except ValueError:
+                return
+            self.stage = step
+            self.bar.set_fraction(max(0.0, min(1.0, step / 5)))
+            self.task.set_text(title)
+            self.detail.set_text(f'Step {step} of 5' if step else 'Preparing installation')
+            for index, (marker, state) in enumerate(self.stages):
+                marker.set_text('✓' if index < step else '●' if index == step else '○')
+                state.set_text('Done' if index < step else 'In progress' if index == step else 'Waiting')
+        elif line.startswith('Compiling '):
+            self.task.set_text(line)
+            self.detail.set_text('Compiling locally from C++ source')
+        elif line.startswith('Generated '):
+            self.detail.set_text('Writing desktop configuration')
+
+    def read_output(self, _fd, _condition):
+        chunk = os.read(self.child.stdout.fileno(), 65536)
+        if chunk:
+            self.buffer += chunk
+            *lines, self.buffer = self.buffer.split(b'\n')
+            for raw in lines:
+                self.accept(raw.decode('utf-8', 'replace').strip())
+            return True
+        if self.buffer:
+            self.accept(self.buffer.decode('utf-8', 'replace').strip())
+        self.exit_code = self.child.wait()
+        self.finished = True
+        self.close_button.show()
+        if self.exit_code == 0:
+            self.bar.set_fraction(1)
+            self.task.set_text('Installation complete')
+            self.detail.set_text('The new bar and controls are ready.')
+            for marker, state in self.stages:
+                marker.set_text('✓')
+                state.set_text('Done')
+        else:
+            self.task.set_text('Installation stopped')
+            self.detail.set_text((self.recent[-1] if self.recent else 'See the terminal for details')[:240])
+            for line in self.recent:
+                print(line, file=sys.stderr)
+        return False
+
+    def pulse(self):
+        if self.finished:
+            return False
+        if self.stage == 0:
+            self.bar.pulse()
+        return True
+
+
+def main():
+    Gtk.init([])
+    Gtk.Settings.get_default().set_property('gtk-icon-theme-name', 'Adwaita')
+    Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', True)
+    css = Gtk.CssProvider()
+    css.load_from_path(str(Path(__file__).resolve().parents[1] / 'lib/rice/panels.css'))
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    window = InstallWindow(sys.argv[1:])
+    window.connect('destroy', Gtk.main_quit)
+    window.present()
+    Gtk.main()
+    return window.exit_code
+
+
+if __name__ == '__main__':
+    sys.exit(main())

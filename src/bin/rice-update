@@ -16,8 +16,11 @@ def main(argv):
     if mode in ('check', '--check'):
         print(json.dumps(update_check.check(), indent=1))
         return 0
+    if mode == 'ignore' and len(argv) == 3:
+        update_check.ignore(argv[2])
+        return 0
     if mode not in ('apply', '--apply', 'update'):
-        print('usage: rice-update [apply|check]', file=sys.stderr)
+        print('usage: rice-update [apply|check|ignore SHA]', file=sys.stderr)
         return 2
     update_check.write_progress(phase='download', task='Starting update', done=0, total=0)
     update_check.notify('Rice update', 'Downloading the latest rice…',
