@@ -43,6 +43,9 @@ if [[ $dry != --dry-run ]]; then
     cp -a "$repo/src/lib/waybar/tooltip-delay.c" "$HOME/.local/lib/waybar/"
     chmod +x "$HOME/.local/bin/"*
     lua "$repo/src/config/apply.lua"
+    # Apply notification styling (right-aligned dismiss ✕) without waiting for
+    # a session restart; makoctl talks to mako over the session bus.
+    if command -v makoctl >/dev/null 2>&1; then makoctl reload >/dev/null 2>&1 || true; fi
     ln -sfn "$repo/src/config/hyprland.lua" "$HOME/.config/hypr/hyprland.lua"
     cp -a "$repo/src/native/hyprland.conf" "$HOME/.config/hypr/hyprland.conf"
 fi

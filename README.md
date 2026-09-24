@@ -30,7 +30,9 @@ If the readiness check reports inactive network or Bluetooth services, choose th
 | `src/config/` | Lua sources that generate desktop configs |
 | `src/bin/`, `src/lib/` | Installed commands and shared readers |
 | `src/quickshell/`, `src/native/` | QML and C++ bar engines |
+| `src/data/` | Update descriptions (`updates.json`) and private-data editors |
 | `src/installer/`, `src/systemd/` | Install logic and user services |
+| `AGENTS.md` | Instructions for AI assistants adding and shipping features |
 | `wallpaper/` | Add your own PNG, JPEG or WebP images here |
 | `*-Options.example.json` | Safe templates copied to private local settings |
 
@@ -64,9 +66,17 @@ The installer detects the primary output in a running Hyprland session and write
 
 ## Updates
 
-`rice-update-watch.service` checks the upstream repository every 30 minutes and sends a desktop notification when new commits are published. The Settings menu opens with a **Download update** row at the very top while an update is waiting; choosing it starts `rice-update.service`, which runs `git pull --ff-only` and re-runs `./Installer --install` to redeploy scripts, services and generated configs, then reports the result as a notification. When nothing is new, the same row shows the last check time and re-checks on click.
+`rice-update-watch.service` checks the upstream repository every 30 minutes and sends a desktop notification when new commits are published. The notification stays until dismissed: click it (the ✕ near the right edge marks the spot) and mako closes it. Nothing is ever installed automatically — the user always chooses when to download.
 
-Check or apply from a terminal with `rice-update check` and `rice-update apply`. The cached state lives in `~/.local/state/rice/update.json`. Checking uses the checkout's own remote first and falls back to the public HTTPS mirror, so a default HTTPS clone needs no credentials while an SSH remote needs a registered key. **Share an idea** at the bottom of the Settings menu opens a new issue on this repository.
+Every commit is tracked on its own in `~/.local/state/rice/update.json` under `updates`, keyed by its twelve character id with `new`, `summary`, `detail`, `kind` (`optional` or `recommended`), `applied` and `when` fields:
+
+- **Download update** appears at the very top of the Settings menu only while some update is still new (never seen). An **Ignore** button sits beside it: it flips `new` to false, so the row disappears and the update is reachable only from **Update history** — it is never lost and never forced.
+- Clicking **Download update** closes the Settings menu (and the updates window if it is open) and shows a centered overlay window — like a floating terminal — with a longer description of exactly what the update changes. **Download** inside that overlay starts `rice-update.service`, which runs `git pull --ff-only` and re-runs `./Installer --install` to redeploy scripts, services and generated configs, then reports the result as a notification.
+- **Update history** at the bottom of the Settings menu (below **Share an idea**) opens the same centered window listing every known update with a one line description and an `(optional)` or `(recommended)` tag. Clicking an entry opens its detail overlay; applied updates show when they landed, and ignored ones can still be downloaded from there.
+
+Descriptions come from `src/data/updates.json`, then `Rice-Update-Summary` / `Rice-Update-Detail` / `Rice-Update-Kind` commit trailers, then the commit subject itself. When nothing is new, the top row shows the last check time and re-checks on click.
+
+Check or apply from a terminal with `rice-update check` and `rice-update apply`. Checking uses the checkout's own remote first and falls back to the public HTTPS mirror, so a default HTTPS clone needs no credentials while an SSH remote needs a registered key. **Share an idea** at the bottom of the Settings menu opens a new issue on this repository.
 
 ## Controls and troubleshooting
 

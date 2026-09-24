@@ -1,0 +1,42 @@
+{
+ "56e5b3eb3dba": {
+  "summary": "Smaller shuffle and repeat glyphs",
+  "detail": "Shuffle and repeat glyphs shrunk to two-thirds inside the transport controls; button boxes and the 40 pixel bar height stay the same.",
+  "kind": "optional"
+ },
+ "c7b85aa6a149": {
+  "summary": "Twice as large media glyphs",
+  "detail": "The five media transport icons (shuffle, previous, play, next, repeat) grew to roughly double their old size in all three bar engines.",
+  "kind": "optional"
+ },
+ "11fd82d0d96c": {
+  "summary": "Update notifications and settings controls",
+  "detail": "Adds rice-update-watch, the Download update row in Quick settings, and the rice-update command that downloads and reinstalls the rice.",
+  "kind": "recommended"
+ },
+ "ce81c2c5f89b": {
+  "summary": "Reorganized rice with guided installer",
+  "detail": "Repository restructured around src/, plus the interactive Installer with readiness checks and support for three interchangeable bar engines.",
+  "kind": "recommended"
+ },
+ "8e246484a04a": {
+  "summary": "External display settings panel",
+  "detail": "Adds a Displays page that mirrors or extends an external monitor from the control panel.",
+  "kind": "optional"
+ },
+ "2284e7782398": {
+  "summary": "HDMI mirroring and sound wheel",
+  "detail": "Projector mirroring from the display controls and refined volume wheel steps in the sound widget.",
+  "kind": "optional"
+ },
+ "0c6ee2d4b665": {
+  "summary": "Portable rice sources and private data",
+  "detail": "Moves machine specific configuration into src/ and introduces private local data files kept out of Git.",
+  "kind": "recommended"
+ },
+ "d40ae732ec2e": {
+  "summary": "Initial rice repository",
+  "detail": "First published version of the Hyprland rice.",
+  "kind": "recommended"
+ }
+}

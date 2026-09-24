@@ -100,9 +100,85 @@ def media_data():
     return mpris.get_state(('loop','shuffle','metadata'))
 
 
+# Small widget builders shared by the docked Panel and centered UpdatesOverlay.
+def make_label(text,css=None):
+    label=Gtk.Label(label=str(text),xalign=0)
+    label.set_max_width_chars(28)
+    label.set_ellipsize(Pango.EllipsizeMode.END)
+    if css:label.get_style_context().add_class(css)
+    return label
+
+
+def make_wrap_label(text,css=None):
+    # Update summaries and descriptions run long, so they wrap instead of
+    # ellipsizing the way make_label does.
+    label=Gtk.Label(label=str(text),xalign=0)
+    label.set_line_wrap(True)
+    label.set_max_width_chars(44)
+    if css:label.get_style_context().add_class(css)
+    return label
+
+
+def make_icon(name,size=20):
+    icon=Gtk.Image.new_from_icon_name(name,Gtk.IconSize.BUTTON)
+    icon.set_pixel_size(size)
+    return icon
+
+
+def make_icon_button(icon,tip,fn):
+    button=Gtk.Button()
+    button.get_style_context().add_class('icon-button')
+    button.set_tooltip_text(tip)
+    button.add(make_icon(icon,16))
+    button.connect('clicked',lambda *_:fn())
+    return button
+
+
+def make_section(body,title):
+    body.pack_start(make_label(title,'section'),False,False,0)
+    group=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=2)
+    group.get_style_context().add_class('group')
+    body.pack_start(group,False,False,0)
+    return group
+
+
+def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_title=False):
+    row=Gtk.Button() if fn else Gtk.Box()
+    row.get_style_context().add_class('device-row')
+    if selected:row.get_style_context().add_class('selected')
+    box=Gtk.Box(spacing=12)
+    box.pack_start(make_icon(icon),False,False,0)
+    text=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=4)
+    head=make_wrap_label(title,'row-title') if wrap_title else make_label(title,'row-title')
+    text.pack_start(head,False,False,0)
+    if subtitle:
+        sub=make_label(subtitle,'subtitle')
+        sub.set_tooltip_text(subtitle)
+        text.pack_start(sub,False,False,0)
+    box.pack_start(text,True,True,0)
+    if tail:box.pack_end(tail,False,False,0)
+    elif selected:box.pack_end(make_icon('object-select-symbolic',16),False,False,0)
+    elif fn:box.pack_end(make_icon('go-next-symbolic',14),False,False,0)
+    if fn:
+        row.add(box)
+        row.connect('clicked',lambda *_:fn())
+    else:row.pack_start(box,True,True,0)
+    parent.pack_start(row,False,False,0)
+    return row
+
+
+def make_action_button(parent,title,fn,primary=False):
+    button=Gtk.Button(label=title)
+    button.get_style_context().add_class('primary' if primary else 'secondary')
+    button.connect('clicked',lambda *_:fn())
+    parent.pack_start(button,False,False,0)
+    return button
+
+
 class Panel(Gtk.ApplicationWindow):
     def __init__(self,app,page):
         super().__init__(application=app)
+        self.app=app
         self.set_title('Desktop controls')
         self.set_name('rice-overlay')
         self.set_decorated(False)
@@ -204,54 +280,19 @@ class Panel(Gtk.ApplicationWindow):
         return False
 
     def label(self,text,css=None):
-        label=Gtk.Label(label=str(text),xalign=0)
-        label.set_max_width_chars(28)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        if css: label.get_style_context().add_class(css)
-        return label
+        return make_label(text,css)
 
     def icon(self,name,size=20):
-        icon=Gtk.Image.new_from_icon_name(name,Gtk.IconSize.BUTTON)
-        icon.set_pixel_size(size)
-        return icon
+        return make_icon(name,size)
 
     def icon_button(self,icon,tip,fn):
-        button=Gtk.Button()
-        button.get_style_context().add_class('icon-button')
-        button.set_tooltip_text(tip)
-        button.add(self.icon(icon,16))
-        button.connect('clicked',lambda *_:fn())
-        return button
+        return make_icon_button(icon,tip,fn)
 
     def section(self,title):
-        self.body.pack_start(self.label(title,'section'),False,False,0)
-        group=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=2)
-        group.get_style_context().add_class('group')
-        self.body.pack_start(group,False,False,0)
-        return group
+        return make_section(self.body,title)
 
     def row(self,parent,title,subtitle,icon,fn=None,selected=False,tail=None):
-        row=Gtk.Button() if fn else Gtk.Box()
-        row.get_style_context().add_class('device-row')
-        if selected:row.get_style_context().add_class('selected')
-        box=Gtk.Box(spacing=12)
-        box.pack_start(self.icon(icon),False,False,0)
-        text=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=4)
-        text.pack_start(self.label(title,'row-title'),False,False,0)
-        if subtitle:
-            sub=self.label(subtitle,'subtitle')
-            sub.set_tooltip_text(subtitle)
-            text.pack_start(sub,False,False,0)
-        box.pack_start(text,True,True,0)
-        if tail:box.pack_end(tail,False,False,0)
-        elif selected:box.pack_end(self.icon('object-select-symbolic',16),False,False,0)
-        elif fn:box.pack_end(self.icon('go-next-symbolic',14),False,False,0)
-        if fn:
-            row.add(box)
-            row.connect('clicked',lambda *_:fn())
-        else:row.pack_start(box,True,True,0)
-        parent.pack_start(row,False,False,0)
-        return row
+        return make_row(parent,title,subtitle,icon,fn,selected,tail)
 
     def switch_row(self,parent,title,subtitle,active,fn,icon):
         switch=Gtk.Switch()
@@ -504,12 +545,31 @@ class Panel(Gtk.ApplicationWindow):
     def render_settings(self,data):
         update=data.get('update') or {}
         group=self.section('Rice update')
-        if update.get('available'):
-            count=update.get('count') or 0
-            detail=f"{count} new commit{'s' if count != 1 else ''}" if count else 'New commits ready'
-            subject=(update.get('subject') or '').strip()
-            if subject:detail+=' · '+subject
-            self.row(group,'Download update',detail,'software-update-available-symbolic',self.download_update)
+        waiting=update_check.pending_updates(update)
+        if waiting:
+            # The row exists only while an update is still new; Ignore flips it
+            # out of sight and the update stays in Update history.
+            sha,entry=waiting[0]
+            detail=entry.get('summary') or 'New commits ready'
+            if len(waiting)>1:detail=f"{len(waiting)} new updates · {detail}"
+            # Ignore sits beside Download, not inside it: one button cannot
+            # contain another, and it needs its own click target.
+            holder=Gtk.Box(spacing=6)
+            group.pack_start(holder,False,False,0)
+            content=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            holder.pack_start(content,True,True,0)
+            self.row(content,'Download update',detail,'software-update-available-symbolic',
+                     lambda s=sha:self.app.open_updates(s))
+            ignore=Gtk.Button(label='Ignore')
+            ignore.get_style_context().add_class('secondary')
+            ignore.set_valign(Gtk.Align.CENTER)
+            ignore.set_tooltip_text('Hide this update · it stays in Update history')
+            ignore.connect('clicked',lambda *_,s=sha:self.work(lambda:update_check.ignore(s)))
+            holder.pack_end(ignore,False,False,0)
+        elif update.get('available'):
+            # Offline fallback: the head moved but no commit messages were read yet.
+            self.row(group,'Download update','New commits ready','software-update-available-symbolic',
+                     lambda:self.app.open_updates(update.get('sha','')))
         elif update.get('error'):
             self.row(group,'Update check failed',update['error'],'dialog-information-symbolic',
                      lambda:self.work(lambda:update_check.check()))
@@ -550,12 +610,8 @@ class Panel(Gtk.ApplicationWindow):
         self.row(self.body,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',lambda:self.launch(['kitty','btop']))
         self.row(self.body,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',lambda:self.launch(['code',str(Path.home()/'.local/share/rice/source')]))
         self.row(self.body,'Share an idea','Suggest a feature or improvement on GitHub','chat-message-new-symbolic',lambda:self.open_url(update_check.ISSUES))
-
-    def download_update(self):
-        # The installer restarts rice-controls, so the update runs in its own
-        # service instead of inside this panel.
-        self.work(lambda:backend.run('systemctl','--user','start','--no-block','rice-update.service',check=True),
-                  done=lambda _:self.close_panel())
+        # Bottom of Settings: the full history lives in a centered overlay.
+        self.row(self.body,'Update history','Every update · new, old and ignored','document-open-recent-symbolic',lambda:self.app.open_updates())
 
     def open_url(self,url):
         try:
@@ -620,11 +676,7 @@ class Panel(Gtk.ApplicationWindow):
                                primary=not mirrored)
 
     def action_button(self,parent,title,fn,primary=False):
-        button=Gtk.Button(label=title)
-        button.get_style_context().add_class('primary' if primary else 'secondary')
-        button.connect('clicked',lambda *_:fn())
-        parent.pack_start(button,False,False,0)
-        return button
+        return make_action_button(parent,title,fn,primary)
 
     def render_power(self):
         self.reset_body();self.spinner.stop();self.spinner.hide();self.body.set_sensitive(True)
@@ -669,14 +721,140 @@ class Panel(Gtk.ApplicationWindow):
         fn();self.close_panel()
 
 
+class UpdatesOverlay(Gtk.Window):
+    """Centered update window: the full history, or one update's details.
+
+    A layer surface with no anchored edge lands in the middle of the screen,
+    like a floating terminal; Panel docks to the right edge instead. App opens
+    it only after closing the panel, because one surface owns the keyboard.
+    """
+
+    def __init__(self,app,sha=None):
+        super().__init__(application=app)
+        self.set_title('Rice updates')
+        self.set_name('rice-overlay')
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        self.set_visual(self.get_screen().get_rgba_visual())
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_namespace(self,'rice-updates')
+        GtkLayerShell.set_layer(self,GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self,GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        self.connect('key-press-event',self.key)
+        card=Gtk.EventBox()
+        card.set_name('panel')
+        card.set_visible_window(True)
+        card.connect('button-press-event',lambda *_:True)
+        card.set_size_request(440,-1)
+        self.add(card)
+        self.layout=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=14)
+        self.layout.set_border_width(20)
+        card.add(self.layout)
+        self.header=Gtk.Box(spacing=10)
+        self.layout.pack_start(self.header,False,False,0)
+        self.back=make_icon_button('go-previous-symbolic','Back',self.history)
+        self.header.pack_start(self.back,False,False,0)
+        self.heading=make_label('','title')
+        self.header.pack_start(self.heading,True,True,0)
+        self.header.pack_start(make_icon_button('window-close-symbolic','Close',self.destroy),False,False,0)
+        self.feedback=make_label('','feedback')
+        self.feedback.set_line_wrap(True)
+        self.layout.pack_start(self.feedback,False,False,0)
+        self.scroller=Gtk.ScrolledWindow()
+        self.scroller.set_policy(Gtk.PolicyType.NEVER,Gtk.PolicyType.AUTOMATIC)
+        self.scroller.set_propagate_natural_height(True)
+        monitor=self.get_display().get_primary_monitor() or self.get_display().get_monitor(0)
+        self.scroller.set_max_content_height(max(240,min(640,monitor.get_geometry().height-200)))
+        self.layout.pack_start(self.scroller,True,True,0)
+        self.body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=8)
+        self.scroller.add(self.body)
+        self.footer=make_label('Esc to close','footer')
+        self.layout.pack_start(self.footer,False,False,0)
+        self.show_all()
+        self.feedback.hide()
+        self.back.hide()
+        if sha:self.detail(sha)
+        else:self.history()
+
+    def key(self,widget,event):
+        if event.keyval==Gdk.KEY_Escape:
+            self.destroy();return True
+        if event.keyval==Gdk.KEY_Left and event.state & Gdk.ModifierType.MOD1_MASK:
+            if self.back.get_visible():self.history()
+            return True
+        return False
+
+    def reset(self):
+        for child in self.body.get_children():child.destroy()
+        self.feedback.hide()
+
+    def history(self):
+        """Every known update, newest first, with its (optional)/(recommended) tag."""
+        self.reset()
+        self.heading.set_text('Update history')
+        self.back.hide()
+        state=update_check.status()
+        entries=sorted(state['updates'].items(),key=lambda item:item[1].get('when') or 0,reverse=True)
+        if not entries:
+            self.body.pack_start(make_label('No updates recorded yet','subtitle'),False,False,0)
+        for sha,entry in entries:
+            tag='(optional)' if entry.get('kind')=='optional' else '(recommended)'
+            if entry.get('applied'):status='applied '+update_check.ago(entry['applied'])
+            elif entry.get('new'):status='new · waiting under Download update'
+            else:status='ignored · still downloadable'
+            make_row(self.body,entry.get('summary') or 'Rice update',f'{tag} · {status}',
+                     'software-update-available-symbolic',lambda s=sha:self.detail(s),wrap_title=True)
+        self.body.show_all()
+        self.footer.set_text(f'{len(entries)} update{"s" if len(entries)!=1 else ""} · Esc to close')
+
+    def detail(self,sha):
+        """One update: summary, the long description and the download action."""
+        self.reset()
+        state=update_check.status()
+        entry=dict(state['updates'].get(sha) or {})
+        summary=(entry.get('summary') or (state.get('subject') or '').strip() or 'Rice update')
+        tag='(optional)' if entry.get('kind')=='optional' else '(recommended)'
+        self.heading.set_text('Update details')
+        self.back.show()
+        meta=tag+(f' · {sha}' if sha else '')
+        if entry.get('when'):meta+=f' · published {update_check.ago(entry["when"])}'
+        self.body.pack_start(make_label(meta,'subtitle'),False,False,0)
+        self.body.pack_start(make_wrap_label(summary,'row-title'),False,False,0)
+        self.body.pack_start(make_wrap_label(entry.get('detail') or summary),False,False,0)
+        if entry.get('applied'):
+            self.body.pack_start(make_label('Applied '+update_check.ago(entry['applied']),'subtitle'),False,False,0)
+        elif not entry.get('new'):
+            self.body.pack_start(make_label('Ignored · not offered at the top of Settings','subtitle'),False,False,0)
+        actions=Gtk.Box(spacing=10)
+        actions.set_homogeneous(True)
+        self.body.pack_start(actions,False,False,0)
+        if not entry.get('applied'):
+            make_action_button(actions,'Download',self.download,primary=True)
+        make_action_button(actions,'Close',self.destroy)
+        self.body.show_all()
+        self.footer.set_text('Esc to close')
+
+    def download(self):
+        # The installer restarts rice-controls, so the pull runs in its own
+        # on-demand service instead of inside this window.
+        try:
+            backend.run('systemctl','--user','start','--no-block','rice-update.service',check=True)
+        except Exception as exc:
+            self.feedback.set_text(str(exc).splitlines()[0][:160])
+            self.feedback.show()
+            return
+        self.destroy()
+
+
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id='org.nestea.DesktopControls',flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
         self.panel=None
+        self.overlay=None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
-        for page in ('audio','network','bluetooth','display','settings','power','code','media'):
+        for page in ('audio','network','bluetooth','display','settings','power','code','media','updates'):
             action=Gio.SimpleAction.new(page,None)
             action.connect('activate',lambda _a,_p,p=page:self.show(p))
             self.add_action(action)
@@ -686,6 +864,10 @@ class App(Gtk.Application):
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(),css,Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def show(self,page):
+        if page=='updates':
+            self.open_updates();return
+        # Panel and overlay never share the screen: one surface owns the keyboard.
+        self.close_overlay()
         if self.panel and not self.panel.closed:
             if self.panel.page==page:self.panel.close_panel()
             else:
@@ -696,12 +878,33 @@ class App(Gtk.Application):
             self.panel.connect('destroy',lambda *_:self.release())
             self.panel.present()
 
+    def open_updates(self,sha=None):
+        """Centered overlay: the full update history, or one update's detail.
+
+        Closing Settings (and any open updates window) first is the point:
+        clicking Download update swaps one surface for the other.
+        """
+        if self.panel and not self.panel.closed:self.panel.close_panel()
+        self.close_overlay()
+        self.hold()
+        self.overlay=UpdatesOverlay(self,sha)
+        self.overlay.connect('destroy',self._overlay_closed)
+        self.overlay.present()
+
+    def close_overlay(self,*_):
+        if self.overlay is not None:self.overlay.destroy()
+        return False
+
+    def _overlay_closed(self,*_):
+        self.overlay=None
+        self.release()
+
     def do_command_line(self,cmd):
         args=cmd.get_arguments();page=args[1] if len(args)>1 else 'settings'
         if page=='--daemon':
             self.hold()
             return 0
-        if page not in ('audio','network','bluetooth','display','settings','power','code','media'):return 1
+        if page not in ('audio','network','bluetooth','display','settings','power','code','media','updates'):return 1
         self.show(page)
         return 0
 

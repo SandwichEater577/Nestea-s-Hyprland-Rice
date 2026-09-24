@@ -39,6 +39,18 @@ return {{
         ["key"] = "anchor",
         ["value"] = "top-right",
     }, {
+        ["key"] = "text-alignment",
+        ["value"] = "right",
+    }, {
+        -- Summary line right-aligned so the ✕ sits next to the border, inside
+        -- the notification. mako 1.11 cannot draw a real close widget, so the
+        -- ✕ is part of the text and a left click anywhere dismisses.
+        ["key"] = "format",
+        ["value"] = "<b>%s</b> ✕\\n%b",
+    }, {
+        ["key"] = "on-button-left",
+        ["value"] = "dismiss",
+    }, {
         ["section"] = "urgency=critical",
     }, {
         ["key"] = "default-timeout",
