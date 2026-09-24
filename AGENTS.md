@@ -50,8 +50,11 @@ State lives in `~/.local/state/rice/update.json`:
 }
 ```
 
-- `check()` fetches the upstream branch and records every commit ahead of `HEAD` as an entry with
-  `new: true`. `status()` only reads the file, so the panel never blocks on the network.
+The installer also writes `~/.local/state/rice/installed-revision` after a successful deploy. Compare upstream against that revision, not merely the checkout's `HEAD`: this checkout is used for development, so a local commit can exist before any desktop files have been installed.
+
+- `check()` fetches the upstream branch and records commits beyond the deployed revision as
+  entries with `new: true`. Older installs without a revision marker use their last successful
+  install time. `status()` only reads the file, so the panel never blocks on the network.
 - `rice-update-watch.service` checks every 30 minutes and notifies only while some entry is still
   `new: true`. `systemctl --user restart rice-update-watch.service` forces an instant check
   (first check runs ~45 s after the restart).

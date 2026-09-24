@@ -69,6 +69,7 @@ fi
 
 step 4 'User services'
 plan 'link and enable the QuickShell bar, control panel, updater and preferred hotspot user services'
+plan 'record the deployed revision for future update checks'
 if [[ $dry != --dry-run ]]; then
     systemctl --user disable --now rice-media-watch.service >/dev/null 2>&1 || true
     [[ ! -L $HOME/.config/systemd/user/rice-media-watch.service ]] || unlink "$HOME/.config/systemd/user/rice-media-watch.service"
@@ -87,6 +88,10 @@ if [[ $dry != --dry-run ]]; then
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
         "$HOME/.local/bin/start-bar"
         systemctl --user restart rice-bar.service
+    fi
+    if revision=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null); then
+        printf '%s\n' "$revision" > "$HOME/.local/state/rice/installed-revision.tmp"
+        mv "$HOME/.local/state/rice/installed-revision.tmp" "$HOME/.local/state/rice/installed-revision"
     fi
 fi
 step 5 'Done · Hyprland Lua and QuickShell bar ready'

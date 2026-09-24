@@ -23,6 +23,7 @@ import os
 from pathlib import Path
 import re
 import select
+import shlex
 import subprocess
 import time
 from collections import deque
@@ -31,6 +32,7 @@ HOME = Path.home()
 SOURCE = HOME / '.local/share/rice/source'
 STATE = HOME / '.local/state/rice'
 FILE = STATE / 'update.json'
+INSTALLED_REVISION = STATE / 'installed-revision'
 PROGRESS_FILE = STATE / 'update-progress.json'
 PUBLIC = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice.git'
 ISSUES = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice/issues/new'
@@ -50,8 +52,11 @@ class UpdateError(RuntimeError):
 def _env():
     # Never prompt: a credential or passphrase dialog would hang a user service.
     env = dict(os.environ)
+    ssh_config = HOME / '.ssh/config'
+    ssh_config = ssh_config if ssh_config.is_file() else Path('/dev/null')
     env.update(GIT_TERMINAL_PROMPT='0',
-               GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=10')
+               GIT_SSH_COMMAND=f'ssh -F {shlex.quote(str(ssh_config))} '
+                               '-o BatchMode=yes -o ConnectTimeout=10')
     return env
 
 
@@ -312,6 +317,17 @@ def _mark_installed(state, when=None):
     return state
 
 
+def _installed_revision():
+    """Commit last deployed by the installer, independent of checkout HEAD."""
+    try:
+        revision = INSTALLED_REVISION.read_text().strip()
+    except OSError:
+        return ''
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+        return ''
+    return revision if _git(['cat-file', '-e', revision + '^{commit}']).returncode == 0 else ''
+
+
 def check():
     """Refresh the cached state from the upstream branch."""
     state = status()
@@ -321,11 +337,21 @@ def check():
         return save(state)
     name = branch()
     if _git(['fetch', '--quiet', '--no-tags', 'origin', name], timeout=60).returncode == 0:
-        pending = _log('HEAD..FETCH_HEAD')
+        installed = _installed_revision()
+        if installed and _git(['merge-base', '--is-ancestor', installed, 'FETCH_HEAD']).returncode == 0:
+            pending = _log(f'{installed}..FETCH_HEAD')
+        elif state.get('applied'):
+            # Older installs have no revision marker. Their last successful
+            # install time is safer than HEAD, which may already contain an
+            # unpublished or locally committed update.
+            pending = [item for item in _log('FETCH_HEAD')
+                       if item[1] > state['applied']]
+        else:
+            pending = _log('HEAD..FETCH_HEAD')
         updates = state['updates']
         # Describe the installed history so Update history is never empty.
         local_catalog = _catalog()
-        for sha, when, body in _log('HEAD', limit=HISTORY):
+        for sha, when, body in _log(installed or 'HEAD', limit=HISTORY):
             if sha not in updates:
                 updates[sha] = _make(sha, when, body, local_catalog.get(sha),
                                      new=False, applied=when)
@@ -337,6 +363,11 @@ def check():
             meta = catalog.get(sha)
             if sha in updates:
                 entry = updates[sha]
+                if entry.get('applied'):
+                    # A previous check may have mistaken a commit in this
+                    # development checkout for an installed update.
+                    entry['applied'] = 0
+                    entry['new'] = True
                 entry['id'] = _update_id(body, meta)
                 if isinstance(meta, dict):
                     summary, detail, kind = _describe(body, meta)

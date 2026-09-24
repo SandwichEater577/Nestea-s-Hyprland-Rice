@@ -69,6 +69,8 @@ The installer detects the primary output in a running Hyprland session and write
 
 `rice-update-watch.service` checks the upstream repository every 30 minutes and sends a desktop notification when new commits are published. The notification stays until dismissed: click it (the ✕ near the right edge marks the spot) and mako closes it. Nothing is ever installed automatically — the user always chooses when to download.
 
+The installer records the last deployed commit separately from the checkout's Git HEAD. A newer commit in the source directory does not count as installed until the installer has successfully refreshed the desktop files and services.
+
 Every commit is tracked on its own in `~/.local/state/rice/update.json` under `updates`, keyed by its twelve character Git hash. New releases also have a five-digit hex ID, starting at `0x00001`, shown in the update UI. Entries contain `new`, `summary`, `detail`, `kind` (`optional` or `recommended`), `applied` and `when` fields:
 
 - **Download update** appears at the very top of the Settings menu only while some update is still new (never seen). An **Ignore** button sits beside it: it flips `new` to false, so the row disappears and the update is reachable only from **Update history** — it is never lost and never forced.
