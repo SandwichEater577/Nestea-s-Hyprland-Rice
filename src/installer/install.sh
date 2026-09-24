@@ -37,16 +37,18 @@ fi
 
 step 2 'Programs and config generation'
 plan 'copy curated helpers to ~/.local/bin and ~/.local/lib/rice'
-plan 'generate Waybar, Kitty, Rofi, Hyprland companions and other configs'
+plan 'generate Kitty, Rofi, Hyprland companions and other configs from Lua'
 if [[ $dry != --dry-run ]]; then
-    mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/rice" "$HOME/.local/lib/waybar" \
-             "$HOME/.config/systemd/user" "$HOME/.config/waybar" "$HOME/.config/hypr" \
+    mkdir -p "$HOME/.local/bin" "$HOME/.local/lib/rice" \
+             "$HOME/.config/systemd/user" "$HOME/.config/hypr" \
              "$HOME/.config/fastfetch" "$HOME/.config/kitty" "$HOME/.config/mako" \
              "$HOME/.config/cava" "$HOME/.config/rofi"
     find "$repo/src/bin" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/bin" {} +
     find "$repo/src/lib/rice" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/lib/rice" {} +
-    cp -a "$repo/src/lib/waybar/tooltip-delay.c" "$HOME/.local/lib/waybar/"
     chmod +x "$HOME/.local/bin/"*
+    for name in build-rice-bar start-waybar ui-backend waybar-spotify rice-media-watch; do
+        [[ ! -f $HOME/.local/bin/$name ]] || unlink "$HOME/.local/bin/$name"
+    done
     lua "$repo/src/config/apply.lua"
     # Apply notification styling (right-aligned dismiss ✕) without waiting for
     # a session restart; makoctl talks to mako over the session bus.
@@ -55,19 +57,9 @@ if [[ $dry != --dry-run ]]; then
     cp -a "$repo/src/native/hyprland.conf" "$HOME/.config/hypr/hyprland.conf"
 fi
 
-step 3 'Native components and wallpaper palette'
-plan 'build the native bar and Waybar tooltip helper if compilers are available'
-plan 'restore the current wallpaper and shared palette'
+step 3 'Wallpaper palette'
+plan 'restore the current wallpaper and QuickShell palette'
 if [[ $dry != --dry-run ]]; then
-    if command -v g++ >/dev/null && pkg-config --exists gtk+-3.0 gtk-layer-shell-0 json-glib-1.0; then
-        "$HOME/.local/bin/build-rice-bar"
-    else
-        echo '  native bar skipped: install C++ and GTK development packages for this option'
-    fi
-    if command -v cc >/dev/null && pkg-config --exists gtk+-3.0; then
-        cc -O2 -fPIC -shared "$repo/src/lib/waybar/tooltip-delay.c" \
-            -o "$HOME/.local/lib/waybar/tooltip-delay.so" $(pkg-config --cflags --libs gtk+-3.0) -ldl
-    fi
     if [[ -n ${WAYLAND_DISPLAY:-} ]] && pgrep -x hyprpaper >/dev/null; then
         "$HOME/.local/bin/change-wallpaper" --restore || python3 "$HOME/.local/lib/rice/wallpaper_palette.py"
     else
@@ -76,25 +68,25 @@ if [[ $dry != --dry-run ]]; then
 fi
 
 step 4 'User services'
-plan 'link and enable the bar, control panel, media watcher, updater and preferred hotspot user services'
+plan 'link and enable the QuickShell bar, control panel, updater and preferred hotspot user services'
 if [[ $dry != --dry-run ]]; then
+    systemctl --user disable --now rice-media-watch.service >/dev/null 2>&1 || true
+    [[ ! -L $HOME/.config/systemd/user/rice-media-watch.service ]] || unlink "$HOME/.config/systemd/user/rice-media-watch.service"
     ln -sfn "$repo/src/systemd/rice-bar.service" "$HOME/.config/systemd/user/rice-bar.service"
     ln -sfn "$repo/src/systemd/rice-controls.service" "$HOME/.config/systemd/user/rice-controls.service"
-    ln -sfn "$repo/src/systemd/rice-media-watch.service" "$HOME/.config/systemd/user/rice-media-watch.service"
     ln -sfn "$repo/src/systemd/rice-hotspot.service" "$HOME/.config/systemd/user/rice-hotspot.service"
     ln -sfn "$repo/src/systemd/rice-update-watch.service" "$HOME/.config/systemd/user/rice-update-watch.service"
     # rice-update.service is deliberately not enabled; the settings panel starts
     # it on demand and it has no install section.
     ln -sfn "$repo/src/systemd/rice-update.service" "$HOME/.config/systemd/user/rice-update.service"
     systemctl --user daemon-reload
-    systemctl --user enable rice-bar.service rice-controls.service rice-media-watch.service rice-hotspot.service rice-update-watch.service
-    systemctl --user restart rice-media-watch.service
+    systemctl --user enable rice-bar.service rice-controls.service rice-hotspot.service rice-update-watch.service
     systemctl --user restart rice-update-watch.service
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then systemctl --user restart rice-controls.service; fi
     systemctl --user restart rice-hotspot.service
     if [[ -n ${WAYLAND_DISPLAY:-} ]]; then
         "$HOME/.local/bin/start-bar"
-        "$HOME/.local/bin/ui-backend" reload
+        systemctl --user restart rice-bar.service
     fi
 fi
-step 5 'Done · clock and bar engine remain changeable in live settings'
+step 5 'Done · Hyprland Lua and QuickShell bar ready'

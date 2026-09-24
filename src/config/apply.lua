@@ -45,9 +45,6 @@ end
 local pending = {}
 for _, item in ipairs(dofile(root .. 'manifest.lua')) do
     local content = render(dofile(root .. item.source), item.format)
-    if item.target == 'waybar/style.css' then
-        content = '@import url("palette.css");\n' .. content
-    end
     pending[#pending+1] = { path=home .. '/.config/' .. item.target, content=content }
 end
 for _, item in ipairs(pending) do

@@ -20,12 +20,12 @@ Nestea's Rice for Hyprland
   ./Installer --install   install or refresh without the menu
   ./Installer --deps      review optional Arch packages
 
-Clock format and bar engine can also be changed in the live settings menu.
+Clock format can also be changed in the live settings menu.
 EOF
 }
 
 check() {
-    local programs=(Hyprland waybar lua python3 nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq)
+    local programs=(Hyprland quickshell lua python3 nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq)
     local missing=() item net bt audio
     for item in "${programs[@]}"; do command -v "$item" >/dev/null || missing+=("$item"); done
     net=$(systemctl is-active NetworkManager 2>/dev/null || true)
@@ -33,8 +33,7 @@ check() {
     audio=$(systemctl --user is-active pipewire 2>/dev/null || true)
     printf 'System      %s\n' "$(. /etc/os-release; printf '%s' "$PRETTY_NAME")"
     printf 'Hyprland    %s\n' "$(command -v Hyprland || printf missing)"
-    printf 'QuickShell  %s\n' "$(command -v quickshell || printf optional-missing)"
-    printf 'Compiler    %s\n' "$(command -v g++ || printf optional-missing)"
+    printf 'QuickShell  %s\n' "$(command -v quickshell || printf missing)"
     printf 'Network     %s\n' "${net:-inactive}"
     printf 'Bluetooth   %s\n' "${bt:-inactive}"
     printf 'Audio       %s\n' "${audio:-inactive}"
@@ -45,9 +44,9 @@ check() {
 
 deps() {
     command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
-    local packages=(hyprland waybar quickshell gtk-layer-shell json-glib imagemagick lua python python-gobject
+    local packages=(hyprland quickshell gtk3 gtk-layer-shell imagemagick lua python python-gobject
                     networkmanager bluez bluez-utils playerctl brightnessctl rofi kitty thunar hyprpaper
-                    mako tlp gcc pkgconf libnotify pipewire-pulse jq)
+                    mako tlp libnotify pipewire-pulse jq)
     printf 'Arch packages: %s\n' "${packages[*]}"
     if [[ ${1:-} == --dry-run ]]; then
         printf 'Preview only: no packages or services will be changed.\n'
@@ -142,7 +141,7 @@ run_core() {
 interactive() {
     [[ $interactive_tty == true ]] || { echo 'Interactive setup needs a terminal. Use --check, --install or --help.' >&2; return 2; }
     trap restore_cursor EXIT
-    local clock backend desktop browser scale wifi bt packages answer current
+    local clock desktop browser scale wifi bt packages answer current
     printf '\n%s┌──────────────────────────────────────────────────────┐%s\n' "$violet" "$reset"
     printf '%s│%s  %sNestea’s Rice for Hyprland%s   %s/ setup%s                %s│%s\n' "$violet" "$reset" "$white" "$reset" "$dim" "$reset" "$violet" "$reset"
     printf '%s└──────────────────────────────────────────────────────┘%s\n' "$violet" "$reset"
@@ -151,41 +150,35 @@ interactive() {
 
     current=24h
     if [[ -f $HOME/.config/rice/settings.json ]] && grep -Eq '"time_format"[[:space:]]*:[[:space:]]*"12h"' "$HOME/.config/rice/settings.json"; then current=12h; fi
-    clock=$(choose '01 / 08  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
+    clock=$(choose '01 / 07  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
         "$([[ $current == 12h ]] && printf 1 || printf 0)" \
         24h '24-hour time   [21:30:45]' 12h '12-hour time   [09:30:45 PM]') || return 0
 
-    current=$(cat "$HOME/.local/state/rice/ui-backend" 2>/dev/null || printf lua)
-    case $current in quickshell) answer=1;; cpp) answer=2;; *) answer=0;; esac
-    backend=$(choose '02 / 08  Which bar engine do you want?' "Current: $current · the look and controls are shared." \
-        "$answer" lua 'Lua / Waybar' quickshell 'QuickShell / QML' cpp 'Native / C++ and ASM') || return 0
-
     current=true
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"desktop_spotify"[[:space:]]*:[[:space:]]*false' "$HOME/.config/rice/Media-Options.json"; then current=false; fi
-    desktop=$(choose '03 / 08  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
+    desktop=$(choose '02 / 07  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, enable desktop Spotify' no 'No, keep it hidden') || return 0
 
     current=false
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"browser_media"[[:space:]]*:[[:space:]]*true' "$HOME/.config/rice/Media-Options.json"; then current=true; fi
-    browser=$(choose '04 / 08  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
+    browser=$(choose '03 / 07  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, include browser players' no 'No, desktop players only') || return 0
 
     current=$(cat "$HOME/.config/rice/display-device.tsv" 2>/dev/null || printf 'auto\t1.0')
-    scale=$(choose '05 / 08  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
+    scale=$(choose '04 / 07  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
         0 keep 'Keep current scale' 1.0 '100%  [compact]' 1.25 '125%  [balanced]' 1.5 '150%  [larger]') || return 0
 
-    wifi=$(choose '06 / 08  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
+    wifi=$(choose '05 / 07  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
         0 later 'Later, use the live network menu' now 'Yes, open NetworkManager') || return 0
 
-    bt=$(choose '07 / 08  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
+    bt=$(choose '06 / 07  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
         0 later 'Later, use the live Bluetooth menu' now 'Yes, open Bluetooth tools') || return 0
 
-    packages=$(choose '08 / 08  Install optional Arch packages?' 'Review the package list before the final installation step.' \
+    packages=$(choose '07 / 07  Install optional Arch packages?' 'Review the package list before the final installation step.' \
         0 no 'No, use installed packages' yes 'Yes, install missing dependencies') || return 0
 
     note 'Your setup'
     note "Clock          $clock"
-    note "Bar engine     $backend"
     note "Spotify        $desktop"
     note "Browser media  $browser"
     note "Display scale  $scale"
@@ -213,12 +206,6 @@ interactive() {
             "$core" --monitors
             [[ -z ${WAYLAND_DISPLAY:-} ]] || hyprctl reload >/dev/null
         else warn 'Display scale needs a running Hyprland session'; fi
-    fi
-    if [[ -x $HOME/.local/bin/ui-backend ]]; then
-        "$HOME/.local/bin/ui-backend" "$backend" || warn 'Bar switch failed; check rice-bar.service'
-    else
-        mkdir -p "$HOME/.local/state/rice"
-        printf '%s\n' "$backend" >"$HOME/.local/state/rice/ui-backend"
     fi
     ok 'Preferences applied'
     [[ $wifi != now ]] || nmtui

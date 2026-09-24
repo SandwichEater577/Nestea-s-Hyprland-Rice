@@ -23,6 +23,8 @@ ShellRoot {
     property string shuffle: ""
     property string shuffle_tooltip: ""
     property string battery: ""
+    property string battery_icon: ""
+    property string battery_tooltip: ""
     property var palette: ({background: "#161616", foreground: "#e4e4e4", border: "#3b3b3b", muted: "#a3a3a3", accent: "#dedede", accent_foreground: "#181818", hover: "#303030"})
     property string timeFormat: "24h"
     property string kickPath: Quickshell.env("HOME") + "/.local/state/rice/status-kick"
@@ -50,6 +52,8 @@ ShellRoot {
         if (typeof s.shuffle === "string" && s.shuffle !== shuffle) shuffle = s.shuffle
         if (typeof s.shuffle_tooltip === "string" && s.shuffle_tooltip !== shuffle_tooltip) shuffle_tooltip = s.shuffle_tooltip
         if (typeof s.battery === "string" && s.battery !== battery) battery = s.battery
+        if (typeof s.battery_icon === "string" && s.battery_icon !== battery_icon) battery_icon = s.battery_icon
+        if (typeof s.battery_tooltip === "string" && s.battery_tooltip !== battery_tooltip) battery_tooltip = s.battery_tooltip
     }
     function action(args) {
         Quickshell.execDetached(args)
@@ -142,7 +146,7 @@ ShellRoot {
                     objectName: "riceLeftRow"
                     anchors.centerIn: parent
                     spacing: 0
-                    BarButton { label: "  " + Qt.formatDateTime(clock.date, root.timeFormat === "12h" ? "hh:mm:ss AP" : "hh:mm:ss"); id: clockBtn; minimumWidth: clockMax.implicitWidth + 16; hint: Qt.formatDateTime(clock.date, "dddd, dd MMMM yyyy"); ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
+                    BarButton { label: "  " + Qt.formatDateTime(clock.date, root.timeFormat === "12h" ? "hh:mm:ss AP" : "hh:mm:ss"); id: clockBtn; interactive: false; minimumWidth: clockMax.implicitWidth + 16; hint: Qt.formatDateTime(clock.date, "dddd, dd MMMM yyyy"); ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
                     Text {
                         id: clockMax
                         visible: false
@@ -176,7 +180,7 @@ ShellRoot {
                         property bool albumTipShown: false
                         Timer {
                             id: albumDelay
-                            interval: 300                 // matches waybar-tooltip.lua delay_ms
+                            interval: 300
                             onTriggered: albumCover.albumTipShown = true
                         }
                         // Own surface: the 40px panel clipped the old ToolTip.
@@ -211,11 +215,11 @@ ShellRoot {
                             }
                         }
                     }
-                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: root.shuffle_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/waybar-spotify", "--toggle-shuffle"]) }
+                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: root.shuffle_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "shuffle"]) }
                     BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒮"; hint: "Previous track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "previous"]) }
                     BarButton { visible: root.spotify_running; glyphSize: 24; label: root.spotify; hint: "Play / pause"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.action(button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "toggle"]); onWheeled: delta => root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", delta > 0 ? "up" : "down"]) }
                     BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒭"; hint: "Next track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "next"]) }
-                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: root.repeat_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/waybar-spotify", "--cycle-repeat"]) }
+                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: root.repeat_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/rice-media", "repeat"]) }
                 }
             }
             Rectangle {
@@ -273,7 +277,7 @@ ShellRoot {
                     BarButton { visible: root.display !== ""; label: root.display; hint: root.display_tooltip || "Displays"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-panel", "display"]) }
                     BarButton { visible: root.bluetooth !== ""; label: root.bluetooth; hint: "Bluetooth devices"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-menu", "bluetooth"]) }
                     BarButton { label: root.network; hint: root.network_tooltip || "Networks"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/desktop-menu", "network"]) }
-                    BarButton { visible: root.battery !== ""; label: "  " + root.battery; hint: "Battery · " + root.battery; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
+                    BarButton { visible: root.battery !== ""; interactive: false; label: root.battery_icon + "  " + root.battery; hint: root.battery_tooltip; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
                     BarButton { label: ""; hint: "Quick settings"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/control-menu"]) }
                     BarButton { label: ""; hint: "Power / session · triple click: shut down"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/power-click"]) }
                 }

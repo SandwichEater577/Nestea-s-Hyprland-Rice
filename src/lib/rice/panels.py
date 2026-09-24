@@ -82,16 +82,11 @@ def bluetooth_data():
 def settings_data():
     fields=backend.run('brightnessctl','-m').split(',')
     brightness=int(fields[3].rstrip('%')) if len(fields)>3 else None
-    battery=next(iter(Path('/sys/class/power_supply').glob('BAT*')),None)
-    battery_text=(battery/'capacity').read_text().strip()+'% · '+(battery/'status').read_text().strip() if battery else ''
     try:
         displays=len(display.display_data()['external'])
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         displays=0
-    backend_file=Path.home()/'.local/state/rice/ui-backend'
-    shell=backend_file.read_text().strip() if backend_file.is_file() else 'lua'
-    if shell not in ('lua','quickshell','cpp'):shell='lua'
-    return dict(brightness=brightness,battery=battery_text,profile=backend.run('tlpctl','get'),displays=displays,shell=shell,
+    return dict(brightness=brightness,profile=backend.run('tlpctl','get'),displays=displays,
                 time_format=backend.run(str(Path.home()/'.local/bin/rice-clock'),'get') or '24h',media=mpris.options(),
                 update=update_check.status())
 
@@ -592,11 +587,6 @@ class Panel(Gtk.ApplicationWindow):
         choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);power.pack_start(choices,False,False,0)
         for label,profile in [('Saver','power-saver'),('Balanced','balanced'),('Fast','performance')]:
             self.action_button(choices,label,lambda p=profile:self.work(lambda:backend.run('tlpctl','set',p,check=True)),primary=data['profile']==profile)
-        shell=self.section('Desktop shell')
-        for key,label,icon,sub in [('lua','Lua / Waybar','preferences-system-symbolic','Full bar generated from Lua sources'),
-                                   ('quickshell','QuickShell','view-grid-symbolic','QML bar with live reload'),
-                                   ('cpp','C++ / ASM','applications-engineering-symbolic','Native GTK bar with x86-64 ASM contrast')]:
-            self.row(shell,label,sub,icon,lambda k=key:self.switch_shell(k),selected=data['shell']==key)
         media=self.section('Media sources')
         for key,label,detail in [('desktop_spotify','Spotify app','Show its playback controls while open'),
                                  ('browser_media','Browser players','Spotify Web, SoundCloud, YouTube Music and other MPRIS sites')]:
@@ -609,7 +599,6 @@ class Panel(Gtk.ApplicationWindow):
         self.row(group,'Media','Playback and source controls','media-playback-start-symbolic',lambda:self.load('media'))
         if data['displays']:
             self.row(group,'Displays',f"{data['displays']} external display{'s' if data['displays'] != 1 else ''} connected",'video-display-symbolic',lambda:self.load('display'))
-        if data['battery']:self.row(self.body,'Battery',data['battery'],'battery-good-symbolic')
         self.row(self.body,'System monitor','CPU, memory and processes','power-profile-performance-symbolic',lambda:self.launch(['kitty','btop']))
         self.row(self.body,'Desktop configuration','Personalize this desktop','preferences-system-symbolic',lambda:self.launch(['code',str(Path.home()/'.local/share/rice/source')]))
         self.row(self.body,'Share an idea','Suggest a feature or improvement on GitHub','chat-message-new-symbolic',lambda:self.open_url(update_check.ISSUES))
@@ -622,11 +611,6 @@ class Panel(Gtk.ApplicationWindow):
             self.close_panel()
         except GLib.Error:
             self.launch(['xdg-open',url])
-
-    def switch_shell(self,choice):
-        # ui-backend validates the choice, persists it and restarts the bar.
-        self.work(lambda:backend.run(str(Path.home()/'.local/bin/ui-backend'),choice,check=True),
-                  done=lambda _:self.load('settings',remember=False))
 
     def render_media(self,data):
         if not data:
@@ -645,10 +629,10 @@ class Panel(Gtk.ApplicationWindow):
             self.row(group,label,'',icon,lambda a=action:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-media'),a,check=True)))
         if data.get('Shuffle') in ('On','Off'):
             self.row(group,'Shuffle','On' if data['Shuffle']=='On' else 'Off','media-playlist-shuffle-symbolic',
-                     lambda:self.work(lambda:backend.run(str(Path.home()/'.local/bin/waybar-spotify'),'--toggle-shuffle',check=True)))
+                     lambda:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-media'),'shuffle',check=True)))
         if data.get('LoopStatus') in ('None','Playlist','Track'):
             self.row(group,'Repeat',data['LoopStatus'],'media-playlist-repeat-symbolic',
-                     lambda:self.work(lambda:backend.run(str(Path.home()/'.local/bin/waybar-spotify'),'--cycle-repeat',check=True)))
+                     lambda:self.work(lambda:backend.run(str(Path.home()/'.local/bin/rice-media'),'repeat',check=True)))
 
     def render_display(self,data):
         internal=data['internal']

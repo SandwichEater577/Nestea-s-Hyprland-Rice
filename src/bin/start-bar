@@ -7,5 +7,5 @@ if systemctl --user cat rice-bar.service >/dev/null 2>&1; then
     systemctl --user reset-failed rice-bar.service
     systemctl --user start rice-bar.service
 else
-    exec "$HOME/.local/bin/start-waybar"
+    exec quickshell --path "$HOME/.local/share/rice/source/src/quickshell/shell.qml"
 fi

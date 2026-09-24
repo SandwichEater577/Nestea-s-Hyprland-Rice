@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Status reader for the QuickShell and native bars.
+"""Status reader for the QuickShell bar.
 
 bar-status           one bounded read, one JSON object (checks and fallback)
 bar-status --watch   long-lived process; one JSON line per change, with
@@ -26,7 +26,8 @@ import rice_status
 KICK = rice_status.STATE / 'status-kick'
 FIELDS = ('audio', 'audio_tooltip', 'network', 'network_tooltip', 'display',
           'display_tooltip', 'bluetooth', 'spotify', 'spotify_running', 'cover',
-          'track', 'repeat', 'repeat_tooltip', 'shuffle', 'shuffle_tooltip', 'battery')
+          'track', 'repeat', 'repeat_tooltip', 'shuffle', 'shuffle_tooltip',
+          'battery', 'battery_icon', 'battery_tooltip')
 DEFAULTS = {name: False if name == 'spotify_running' else '' for name in FIELDS}
 PERIOD = {'fast': 1.0, 'network': 2.0, 'media': 2.0, 'slow': 10.0, 'battery': 30.0}
 EVENT_PROCESSES = set()
@@ -101,10 +102,23 @@ def read_slow():
 def read_battery():
     battery = next(iter(Path('/sys/class/power_supply').glob('BAT*')), None)
     try:
-        text = (battery / 'capacity').read_text().strip() + '%'
-    except (OSError, TypeError):
-        text = ''
-    return {'battery': text}
+        capacity = int((battery / 'capacity').read_text().strip())
+        status = (battery / 'status').read_text().strip()
+    except (OSError, TypeError, ValueError):
+        return {'battery': '', 'battery_icon': '', 'battery_tooltip': ''}
+    icons = ('', '', '', '', '')
+    icon = ('' if status == 'Charging' else '' if status == 'Full' else
+            icons[min(4, max(0, capacity) // 20)])
+    remaining = ''
+    field = 'time_to_full_now' if status == 'Charging' else 'time_to_empty_now'
+    try:
+        seconds = int((battery / field).read_text().strip())
+        if seconds > 0:
+            remaining = f'\n{seconds // 3600}h {(seconds // 60) % 60}m remaining'
+    except (OSError, ValueError):
+        pass
+    return {'battery': f'{capacity}%', 'battery_icon': icon,
+            'battery_tooltip': f'Battery · {capacity}%\n{status}{remaining}'}
 
 
 def media_key(player):

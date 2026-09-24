@@ -1,8 +1,4 @@
 return {{
-        ["source"] = "waybar.lua",
-        ["target"] = "waybar/config.jsonc",
-        ["format"] = "json",
-    }, {
         ["source"] = "fastfetch.lua",
         ["target"] = "fastfetch/config.jsonc",
         ["format"] = "json",
@@ -33,9 +29,5 @@ return {{
     }, {
         ["source"] = "rofi.lua",
         ["target"] = "rofi/config.rasi",
-        ["format"] = "css",
-    }, {
-        ["source"] = "waybar-style.lua",
-        ["target"] = "waybar/style.css",
         ["format"] = "css",
     }}

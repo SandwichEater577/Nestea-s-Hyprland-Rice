@@ -1,22 +1,15 @@
 # Instructions for AI assistants
 
-You are working on Nestea's Hyprland rice. A request like "add a widget", "change the bar" or
-"ship an update" is **done only when the change is pushed to GitHub as a downloadable update** —
-never when it is installed locally. Read this file first; it describes a machine-specific
-workflow that is not obvious from the source tree.
+You are working on Nestea's Hyprland rice. Develop and verify changes locally. Publish a downloadable update only after the user explicitly says to push; never install it locally yourself. Read this file first; it describes a machine-specific workflow that is not obvious from the source tree.
 
 ## Golden rules
 
-1. **Never run `./Installer --install` (or `Installer --install`) yourself.** Every change ships
-   as a downloadable update: push to GitHub, and the user downloads it from the desktop. The user
-   wants to watch the download flow; installing directly skips it.
+1. **Never run `./Installer --install` (or `Installer --install`) yourself.** The user downloads published updates from the desktop and wants to watch that flow. Do not push until the user explicitly authorizes it.
 2. **Never commit secrets or personal data.** `.gitignore` is an allowlist: only `.gitignore`,
    `README.md`, `AGENTS.md`, `Installer`, `install.sh`, the three `*-Options.example.json`
    templates, `src/**` and `wallpaper/.gitkeep` are ever tracked. Do not widen it for personal
    files, keys or state.
-3. **Keep the three bar engines in sync**: Lua/Waybar (`src/config/` + `src/lib/waybar/`),
-   QuickShell (`src/quickshell/`) and the C++ bar (`src/native/rice-bar.cpp`, `src/native/luma.S`).
-   A media, clock or workspace change usually belongs in all three.
+3. **QuickShell owns the topbar** (`src/quickshell/`). Keep its status and actions in `src/bin/` and `src/lib/rice/` in sync. Preserve Hyprland and its Lua config in `src/config/hyprland.lua`.
 4. **Nothing is mandatory.** Updates are `optional` or `recommended`; there is no forced install,
    ever ("not like Windows").
 5. **Git identity is global and permanent on this machine** (NesTea). Just commit; do not set a
@@ -98,7 +91,7 @@ the list window shows; detail is what the overlay expands to.
 Number new updates with a five-digit hexadecimal ID in `Rice-Update-ID`, starting at `0x00001`
 for commit `27843e5`; increment by one for each subsequent shipped update.
 
-## Shipping a change: exact checklist
+## Preparing and shipping a change
 
 1. Read this file, `README.md`, and every file you will touch.
 2. Edit sources under `src/` only.
@@ -107,13 +100,13 @@ for commit `27843e5`; increment by one for each subsequent shipped update.
    python3 -m py_compile src/lib/rice/*.py src/bin/rice-update src/bin/rice-update-watch
    luac -p src/config/*.lua
    bash -n src/installer/install.sh src/bin/desktop-panel
-   # C++ only when src/native changed (compile check, no install):
-   g++ -Wall -Wextra -fsyntax-only $(pkg-config --cflags gtk+-3.0 gtk-layer-shell-0 json-glib-1.0) src/native/rice-bar.cpp
+   /usr/lib/qt6/bin/qmlformat src/quickshell/shell.qml >/dev/null
+   /usr/lib/qt6/bin/qmlformat src/quickshell/BarButton.qml >/dev/null
    # Config generation test against a throwaway HOME:
    mkdir -p /tmp/opencode/fake-home/.config
    HOME=/tmp/opencode/fake-home lua src/config/apply.lua
    ```
-4. Commit with trailers (identity is already configured):
+4. For a local commit, use trailers (identity is already configured):
    ```sh
    git add -A
    git commit -m "Describe the change" -m "Rice-Update-Summary: 1-10 words
@@ -124,7 +117,7 @@ for commit `27843e5`; increment by one for each subsequent shipped update.
    ```sh
    push-next-rice-update -k recommended -s "Short summary" -d "Long description" "Commit subject"
    ```
-5. Push **without installing**: `git push` (or let `push-next-rice-update` push for you).
+5. Push **only with explicit user authorization**, without installing: `git push` (or let `push-next-rice-update` push for you).
 6. Tell the user it is published; for an immediate desktop notification, restart the watcher:
    `systemctl --user restart rice-update-watch.service`.
 7. The change only reaches the desktop after the user chooses **Download update**. If the new UI
@@ -155,10 +148,9 @@ for commit `27843e5`; increment by one for each subsequent shipped update.
 
 ## Services
 
-`rice-bar`, `rice-controls`, `rice-media-watch`, `rice-hotspot`, `rice-update-watch` are enabled
+`rice-bar`, `rice-controls`, `rice-hotspot`, `rice-update-watch` are enabled
 user services; `rice-update.service` is started on demand only. Logs:
-`journalctl --user -u <name> -b`. The user runs the **C++** bar engine (state:
-`~/.local/state/rice/ui-backend`), so C++ changes are the ones they actually see in the bar.
+`journalctl --user -u <name> -b`. The QuickShell bar is the only bar engine; `rice-bar.service` runs `src/quickshell/shell.qml`.
 
 ## When unsure
 

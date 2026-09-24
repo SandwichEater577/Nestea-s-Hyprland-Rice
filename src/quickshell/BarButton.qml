@@ -11,6 +11,7 @@ Rectangle {
     property var pal: null          // palette for the tooltip surface
     property bool active: false
     property bool attention: false
+    property bool interactive: true
     property int minimumWidth: 0
     property int glyphSize: 12       // media transport glyphs opt into 24
     property int horizontalPadding: parent && parent.objectName === "riceLeftRow" ? 7 : 6
@@ -20,7 +21,7 @@ Rectangle {
     implicitWidth: Math.max(minimumWidth, text.implicitWidth + 2 * horizontalPadding)
     implicitHeight: 26
     radius: 6
-    color: active ? activeColor : pointer.containsMouse ? hoverColor : "transparent"
+    color: active ? activeColor : interactive && pointer.containsMouse ? hoverColor : "transparent"
     border.width: attention && !active ? 1 : 0
     border.color: activeColor
     Behavior on color { ColorAnimation { duration: 200 } }
@@ -37,9 +38,12 @@ Rectangle {
         id: pointer
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+        acceptedButtons: button.interactive ? Qt.LeftButton | Qt.RightButton | Qt.MiddleButton : Qt.NoButton
         onClicked: mouse => button.clicked(mouse.button)
-        onWheel: wheel => button.wheeled(wheel.angleDelta.y)
+        onWheel: wheel => {
+            if (button.interactive) button.wheeled(wheel.angleDelta.y)
+            else wheel.accepted = false
+        }
         onContainsMouseChanged: {
             if (containsMouse)
                 tipDelay.restart()
@@ -51,7 +55,7 @@ Rectangle {
     }
     Timer {
         id: tipDelay
-        interval: 300                 // matches waybar-tooltip.lua delay_ms
+        interval: 300
         onTriggered: button.tipShown = true
     }
     // Renders hint below the bar on its own surface, so the 40px panel

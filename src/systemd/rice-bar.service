@@ -1,12 +1,12 @@
 [Unit]
-Description=Selected rice status bar
+Description=Rice QuickShell status bar
 After=graphical-session.target
 StartLimitIntervalSec=30
 StartLimitBurst=8
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/ui-backend run
+ExecStart=/usr/bin/quickshell --path %h/.local/share/rice/source/src/quickshell/shell.qml
 Restart=always
 RestartSec=1
 

@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-WAYBAR_TOOLTIP_DELAY_MS=$(lua -e 'local c = dofile(os.getenv("HOME") .. "/.local/share/rice/source/src/config/waybar-tooltip.lua"); assert(type(c.delay_ms) == "number" and c.delay_ms >= 0 and c.delay_ms <= 10000); print(math.floor(c.delay_ms))')
-export WAYBAR_TOOLTIP_DELAY_MS
-export LD_PRELOAD="$HOME/.local/lib/waybar/tooltip-delay.so${LD_PRELOAD:+:$LD_PRELOAD}"
-exec /usr/bin/waybar "$@"

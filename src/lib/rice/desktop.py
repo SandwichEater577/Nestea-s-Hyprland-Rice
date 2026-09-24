@@ -3,10 +3,8 @@
 import fcntl
 import html
 import json
-import os
 from pathlib import Path
 import re
-import signal
 import subprocess as sp
 import sys
 import time
@@ -55,10 +53,6 @@ def audio(action):
                 else:
                     BOOST.touch(mode=0o600)
                 notify('Volume ceiling: ' + ('150% (boost)' if BOOST.exists() else '100%'))
-                try:
-                    pid=int((STATE/'audio-watch.pid').read_text())
-                    if b'audio_watch.py' in Path(f'/proc/{pid}/cmdline').read_bytes():os.kill(pid,signal.SIGUSR1)
-                except (OSError,ValueError):pass
             else:
                 run('wpctl', 'set-volume', '-l', '1.5' if BOOST.exists() else '1.0', SINK, '3%+' if action == 'up' else '3%-', check=True)
         return

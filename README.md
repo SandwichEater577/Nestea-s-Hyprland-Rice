@@ -1,6 +1,6 @@
 # Nestea's Rice for Hyprland
 
-A monochrome Hyprland desktop with three interchangeable bar engines: Lua-generated Waybar, QuickShell, and a native C++ bar with a small x86-64 assembly routine. They share controls, media selection, clock settings, and wallpaper colors. Lua / Waybar is the default.
+A monochrome Hyprland desktop with a QuickShell topbar. Hyprland and the other desktop application configs remain Lua based. The bar keeps the existing controls, media selection, clock settings, and wallpaper colors.
 
 ## Start from zero
 
@@ -14,11 +14,11 @@ cd ~/config
 ./Installer
 ```
 
-The installer asks one question at a time: clock format, bar engine, desktop and browser media, display scale, Wi-Fi, Bluetooth, and optional Arch packages. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. The six-dot indicator shows progress during installation. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
+The installer asks one question at a time: clock format, desktop and browser media, display scale, Wi-Fi, Bluetooth, and optional Arch packages. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. The six-dot indicator shows progress during installation. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
 
-The install links this checkout at `~/.local/share/rice/source`. Keep the checkout after installing. Edit sources in `src/`, then run `./Installer --install` to deploy them. Changes to QuickShell QML load directly from the checkout. To regenerate only Lua-produced configs, use `lua src/config/apply.lua`.
+The install links this checkout at `~/.local/share/rice/source`. Keep the checkout after installing. Edit sources in `src/`, then run `./Installer --install` to deploy them. QuickShell reads its QML from this checkout. To regenerate the remaining Lua-produced configs, use `lua src/config/apply.lua`.
 
-The initial setup expects Hyprland, NetworkManager, BlueZ, PipeWire, a Wayland session, and the programs reported by `./Installer --check`. QuickShell and the C++ build are optional until you select those engines. The package step asks before invoking `sudo pacman` and does not install hardware drivers or change the kernel.
+The initial setup expects Hyprland, NetworkManager, BlueZ, PipeWire, a Wayland session, and the programs reported by `./Installer --check`. QuickShell is required for the topbar. The package step asks before invoking `sudo pacman` and does not install hardware drivers or change the kernel.
 
 If the readiness check reports inactive network or Bluetooth services, choose the service prompt in `./Installer --deps` or run `sudo systemctl enable --now NetworkManager bluetooth`. Log into Hyprland before the first live bar preview; the installer can still generate files from a plain terminal.
 
@@ -29,7 +29,8 @@ If the readiness check reports inactive network or Bluetooth services, choose th
 | `Installer` | Terminal setup, preferences and readiness |
 | `src/config/` | Lua sources that generate desktop configs |
 | `src/bin/`, `src/lib/` | Installed commands and shared readers |
-| `src/quickshell/`, `src/native/` | QML and C++ bar engines |
+| `src/quickshell/` | Topbar QML and reusable button component |
+| `src/native/hyprland.conf` | Text fallback for Hyprland; the Lua config remains primary |
 | `src/data/` | Update descriptions (`updates.json`) and private-data editors |
 | `src/installer/`, `src/systemd/` | Install logic and user services |
 | `AGENTS.md` | Instructions for AI assistants adding and shipping features |
@@ -46,7 +47,7 @@ An older encrypted preference file is supported at `~/.config/rice/private.json.
 
 ## Media controls
 
-**Desktop Spotify** is enabled by default. **Browser media** is optional in the installer and live Media settings. It can use Spotify Web, SoundCloud, YouTube Music, and other sites when your browser exposes an MPRIS player through the desktop. Supported browser player names include Chromium, Chrome, Brave, Firefox, Vivaldi, Edge, and Opera. The bar shows media controls only while an enabled player is available. Play/pause, next/previous, cover art, and available repeat/shuffle controls use the same actions across engines. Album details appear on cover hover after 300 ms.
+**Desktop Spotify** is enabled by default. **Browser media** is optional in the installer and live Media settings. It can use Spotify Web, SoundCloud, YouTube Music, and other sites when your browser exposes an MPRIS player through the desktop. Supported browser player names include Chromium, Chrome, Brave, Firefox, Vivaldi, Edge, and Opera. The bar shows media controls only while an enabled player is available. Play/pause, next/previous, cover art, and available repeat/shuffle controls use the same actions in the bar and Media page. Album details appear on cover hover after 300 ms.
 
 Use `rice-media get`, `rice-media set desktop_spotify on|off`, or `rice-media set browser_media on|off` from a terminal. The settings live in `~/.config/rice/Media-Options.json`. Browser integration depends on that browser's MPRIS support and the site providing media metadata; the installer does not add browser extensions.
 
@@ -54,13 +55,13 @@ Audio and media changes wake the bar on PipeWire/MPRIS events. Network and Bluet
 
 ## Bar, clock and wallpaper
 
-Choose an engine in the installer or the bar's Settings menu, or run `ui-backend lua`, `ui-backend quickshell`, or `ui-backend cpp`. The supervisor starts the replacement, waits until Hyprland sees its layer, then closes the previous engine. `ui-backend reload` refreshes the current engine the same way. Repeated crashes of an optional engine restore Waybar. A brief overlap is intentional; a structural Waybar config change can likewise replace Waybar while one remains visible.
+QuickShell runs the topbar through `rice-bar.service` and reads `src/quickshell/shell.qml` directly from the checkout. The installer restarts that service after an update; `systemctl --user restart rice-bar.service` refreshes it manually. Bar engine selection is no longer part of setup or Settings.
 
 The clock can be changed to 12 or 24 hour format in the installer, live Settings menu, or with `rice-clock set 12h|24h`. Its setting is in `~/.config/rice/settings.json`.
 
-Put images in `wallpaper/`. **Super+T** changes wallpaper and generates the shared bar palette in the same action. Waybar watches its palette CSS and updates colors without restarting; QuickShell and C++ read the same palette. Original images are untouched. The generated palette is in `~/.local/state/rice/palette.json` and `~/.config/waybar/palette.css`.
+Put images in `wallpaper/`. **Super+T** changes wallpaper and generates the QuickShell palette in the same action. QuickShell watches that file and changes colors without restarting. Original images are untouched. The generated palette is in `~/.local/state/rice/palette.json`.
 
-The sampled colors for each image are cached in `~/.cache/rice/wallpaper-palettes/`. Later visits reuse that palette; changing an image's size or modification time recomputes it. C++ also watches palette file changes, so its colors update without waiting for its fallback poll.
+The sampled colors for each image are cached in `~/.cache/rice/wallpaper-palettes/`. Later visits reuse that palette; changing an image's size or modification time recomputes it.
 
 The installer detects the primary output in a running Hyprland session and writes local display rules in `~/.config/rice/display-device.tsv` and `monitors.conf`. Adjust scale in the installer or live Displays menu. Connected secondary displays can be mirrored or extended from Displays; their choices live in `~/.config/rice/display-layout.tsv`. On another machine, review these local files rather than copying this laptop's output names. The Lua source used at login is `src/config/hyprland.lua`; a text fallback is `src/native/hyprland.conf`.
 
@@ -80,8 +81,8 @@ Check or apply from a terminal with `rice-update check` and `rice-update apply`.
 
 ## Controls and troubleshooting
 
-The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The media cover opens the Media page; hover shows track details. Workspace buttons 1–5 stay visible, along with every workspace containing a window and the current workspace even when empty. A thin outline marks a workspace requesting attention (for example, when Brave opens a tab there from another workspace); visiting it clears the outline. Buttons switch via Hyprland's dispatch API.
+The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The clock and battery show information without click actions. The media cover opens the Media page; hover shows track details. Workspace buttons 1–5 stay visible, along with every workspace containing a window and the current workspace even when empty. A thin outline marks a workspace requesting attention (for example, when Brave opens a tab there from another workspace); visiting it clears the outline. Buttons switch via Hyprland's dispatch API.
 
-Check services with `systemctl --user status rice-bar rice-controls rice-media-watch rice-hotspot rice-update-watch`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-media-watch -u rice-update-watch -b`. If a chosen engine cannot start, run `ui-backend lua` to return to Waybar. `./Installer --check` reports missing commands.
+Check services with `systemctl --user status rice-bar rice-controls rice-hotspot rice-update-watch`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-hotspot -u rice-update-watch -b`. `./Installer --check` reports missing commands.
 
 Local connection data, wallpaper images, caches, keys and screenshots are ignored by Git. Review `git status` before publishing changes.

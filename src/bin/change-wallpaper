@@ -47,7 +47,7 @@ def main():
                 wallpaper_palette.publish(prepared.result(timeout=20))
             except (OSError,ValueError,subprocess.SubprocessError) as error:
                 print(f'Wallpaper palette: {error}',file=sys.stderr)
-        # Waybar monitors imported palette.css and updates its CSS in place.
+        # QuickShell watches palette.json and updates its colors in place.
         print(chosen)
         return 0
 try:

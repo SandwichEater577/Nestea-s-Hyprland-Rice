@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sample a wallpaper and publish one high-contrast palette for every bar."""
+"""Sample a wallpaper and publish a high-contrast palette for QuickShell."""
 import json
 import hashlib
 import os
@@ -109,10 +109,6 @@ def replace_changed(dest, data):
 def publish(values):
     STATE.mkdir(parents=True, exist_ok=True)
     replace_changed(STATE / 'palette.json', json.dumps(values, sort_keys=True) + '\n')
-    css = HOME / '.config/waybar/palette.css'
-    css.parent.mkdir(parents=True, exist_ok=True)
-    lines = ['@define-color rice_%s %s;' % (k, v) for k, v in values.items() if k != 'scheme']
-    replace_changed(css, '\n'.join(lines) + '\n')
     return values
 
 

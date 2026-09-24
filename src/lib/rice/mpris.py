@@ -120,7 +120,7 @@ def cover(state):
         path = Path(unquote(parsed.path))
         image = str(path) if path.is_file() else ''
     elif parsed.scheme in ('http', 'https'):
-        cache = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'waybar-spotify'
+        cache = Path(os.environ.get('XDG_CACHE_HOME', Path.home() / '.cache')) / 'rice-media-covers'
         cache.mkdir(parents=True, exist_ok=True)
         path = cache / (hashlib.sha256(url.encode()).hexdigest() + '.art')
         if not path.is_file():

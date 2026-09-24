@@ -1,4 +1,4 @@
-"""Fast, bounded status reads shared by all three bar backends."""
+"""Fast, bounded status reads for the QuickShell bar."""
 import html
 import json
 import os

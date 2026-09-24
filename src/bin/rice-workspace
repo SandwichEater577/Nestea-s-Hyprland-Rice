@@ -39,44 +39,7 @@ def visible_workspaces(current, existing):
     return sorted(set(range(1, 6)) | existing | ({current} if current > 0 else set()))
 
 
-def ensure_waybar_modules(visible):
-    """Grow the generated Waybar config only when an occupied ID exceeds 9."""
-    home = Path.home()
-    try:
-        engine = (home / '.local/state/rice/ui-backend').read_text().strip()
-    except OSError:
-        return
-    if engine != 'lua':
-        return
-    path = home / '.config/waybar/config.jsonc'
-    try:
-        config = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return
-    modules = config.get('modules-center', [])
-    missing = [n for n in visible if n > 5 and f'custom/workspace-{n}' not in modules]
-    if not missing:
-        return
-    for number in missing:
-        name = f'custom/workspace-{number}'
-        config[name] = {
-            'exec': f'~/.local/bin/rice-workspace --watch {number}',
-            'exec-on-event': False, 'format': '{}', 'hide-empty-text': True,
-            'on-click': f'~/.local/bin/rice-workspace {number}',
-            'return-type': 'json', 'tooltip': False,
-        }
-    numbers = sorted({int(name.removeprefix('custom/workspace-'))
-                      for name in modules if name.startswith('custom/workspace-') and
-                      name.removeprefix('custom/workspace-').isdigit()} | set(missing))
-    config['modules-center'] = [f'custom/workspace-{n}' for n in numbers]
-    temp = path.with_suffix('.tmp')
-    temp.write_text(json.dumps(config, separators=(',', ':')) + '\n')
-    temp.replace(path)
-    subprocess.Popen([str(home / '.local/bin/ui-backend'), 'reload'],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def stream(mode, number=0):
+def stream():
     previous = None
     urgents = {}  # window address -> workspace, cleared when that workspace is visited
     current = active()
@@ -85,14 +48,7 @@ def stream(mode, number=0):
         nonlocal previous
         attention = list(dict.fromkeys(urgents.values()))
         visible = visible_workspaces(current, existing)
-        if mode == 'button':
-            if number == 1:
-                ensure_waybar_modules(visible)
-            payload = {'text': str(number) if number in visible else '',
-                       'class': ['rice-workspace', 'active' if current == number else
-                                 'attention' if number in attention else 'inactive']}
-        else:
-            payload = {'active': current, 'visible': visible, 'attention': attention}
+        payload = {'active': current, 'visible': visible, 'attention': attention}
         if payload != previous:
             print(json.dumps(payload), flush=True)
             previous = payload
@@ -156,13 +112,11 @@ def focus(number):
 def main():
     args = sys.argv[1:]
     if args == ['--stream']:
-        stream('stream')
-    elif len(args) == 2 and args[0] == '--watch' and args[1].isdigit():
-        stream('button', int(args[1]))
+        stream()
     elif len(args) == 1 and args[0].isdigit():
         focus(int(args[0]))
     else:
-        raise ValueError('usage: rice-workspace [--stream|--watch N|N]')
+        raise ValueError('usage: rice-workspace [--stream|N]')
 
 
 if __name__ == '__main__':
