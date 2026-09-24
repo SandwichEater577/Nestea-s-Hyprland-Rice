@@ -281,7 +281,7 @@ ShellRoot {
                 anchors.right: parent.right
                 anchors.rightMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                implicitWidth: rightRow.implicitWidth
+                implicitWidth: rightRow.implicitWidth + 4 // 2 px on each horizontal side
                 height: 31
                 radius: 10
                 color: root.palette.background
