@@ -148,30 +148,23 @@ local bar = {
     ["margin-right"] = 8,
     ["margin-top"] = 5,
     ["on-sigusr2"] = "noop",
-    ["modules-center"] = {"custom/workspace-1", "custom/workspace-2", "custom/workspace-3", "custom/workspace-4", "custom/workspace-5", "custom/workspace-extra"},
+    ["modules-center"] = {},
     ["modules-left"] = {"custom/clock", "custom/audio", "image#spotify-cover", "custom/spotify-shuffle", "custom/spotify-prev", "custom/spotify", "custom/spotify-next", "custom/spotify-repeat"},
     ["modules-right"] = {"custom/vscode", "custom/terminal", "custom/files", "custom/display", "bluetooth", "custom/network", "battery", "custom/control", "custom/power"},
     ["position"] = "top",
     ["reload_style_on_change"] = true,
     ["spacing"] = 0
 }
-for n = 1, 5 do
+for n = 1, 9 do
+    table.insert(bar["modules-center"], "custom/workspace-" .. n)
     bar["custom/workspace-" .. n] = {
         ["exec"] = "~/.local/bin/rice-workspace --watch " .. n,
         ["exec-on-event"] = false,
         ["format"] = "{}",
+        ["hide-empty-text"] = n > 5,
         ["on-click"] = "~/.local/bin/rice-workspace " .. n,
         ["return-type"] = "json",
         ["tooltip"] = false,
     }
 end
-bar["custom/workspace-extra"] = {
-    ["exec"] = "~/.local/bin/rice-workspace --watch-extra",
-    ["exec-on-event"] = false,
-    ["format"] = "{}",
-    ["hide-empty-text"] = true,
-    ["on-click"] = "~/.local/bin/rice-workspace --go-extra",
-    ["return-type"] = "json",
-    ["tooltip"] = false,
-}
 return bar

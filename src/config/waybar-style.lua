@@ -45,7 +45,7 @@ return {
     { selector = "#custom-audio.boosted", entries = {
         { key = "border-bottom", value = "2px solid @rice_accent" },
     } },
-    { selector = "#custom-workspace-1, #custom-workspace-2, #custom-workspace-3, #custom-workspace-4, #custom-workspace-5, #custom-workspace-extra", entries = {
+    { selector = ".rice-workspace", entries = {
         { key = "color", value = "@rice_muted" },
         { key = "background", value = "transparent" },
         { key = "min-width", value = "39px" },
@@ -55,11 +55,11 @@ return {
         { key = "border-radius", value = "5px" },
         { key = "transition", value = "background-color 200ms ease-out, color 200ms ease-out" },
     } },
-    { selector = "#custom-workspace-1.active, #custom-workspace-2.active, #custom-workspace-3.active, #custom-workspace-4.active, #custom-workspace-5.active, #custom-workspace-extra.active, #custom-workspace-1:hover, #custom-workspace-2:hover, #custom-workspace-3:hover, #custom-workspace-4:hover, #custom-workspace-5:hover, #custom-workspace-extra:hover", entries = {
+    { selector = ".rice-workspace.active, .rice-workspace:hover", entries = {
         { key = "background", value = "@rice_accent" },
         { key = "color", value = "@rice_accent_foreground" },
     } },
-    { selector = "#custom-workspace-1.attention, #custom-workspace-2.attention, #custom-workspace-3.attention, #custom-workspace-4.attention, #custom-workspace-5.attention, #custom-workspace-extra.attention", entries = {
+    { selector = ".rice-workspace.attention", entries = {
         { key = "border", value = "1px solid @rice_accent" },
         { key = "color", value = "@rice_accent" },
     } },

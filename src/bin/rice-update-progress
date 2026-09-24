@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+"""Persistent, measured progress window for a rice update install."""
+import fcntl
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('GtkLayerShell', '0.1')
+from gi.repository import Gdk, GLib, Gtk, GtkLayerShell
+
+library = Path.home() / '.local/lib/rice'
+if not (library / 'update_check.py').exists():
+    library = Path(__file__).resolve().parents[1] / 'lib/rice'
+sys.path.insert(0, str(library))
+import update_check
+
+
+def label(value, style=None):
+    widget = Gtk.Label(label=value, xalign=0)
+    widget.set_line_wrap(True)
+    if style:
+        widget.get_style_context().add_class(style)
+    return widget
+
+
+class ProgressWindow(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='Rice update progress')
+        self.set_name('rice-overlay')
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        self.set_visual(self.get_screen().get_rgba_visual())
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_namespace(self, 'rice-update-progress')
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        self.finished = False
+        self.started = time.monotonic()
+        self.connect('delete-event', lambda *_: not self.finished)
+        self.connect('key-press-event', self.on_key)
+
+        card = Gtk.EventBox()
+        card.set_name('panel')
+        card.set_size_request(460, -1)
+        self.add(card)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        body.set_border_width(22)
+        card.add(body)
+        body.pack_start(label('Installing update', 'title'), False, False, 0)
+        state = update_check.status()
+        pending = update_check.pending_updates(state)
+        if pending:
+            entry = pending[0][1]
+            name = update_check.display_name(entry)
+            body.pack_start(label(name, 'row-title'), False, False, 0)
+            body.pack_start(label(entry.get('detail') or name, 'subtitle'), False, False, 0)
+
+        self.download, self.download_task, self.download_amount = self.add_stage(body, 'Download')
+        self.install, self.install_task, self.install_amount = self.add_stage(body, 'Install')
+        self.outcome = label('Starting…', 'feedback')
+        body.pack_start(self.outcome, False, False, 0)
+        self.close_button = Gtk.Button(label='Close')
+        self.close_button.get_style_context().add_class('secondary')
+        self.close_button.connect('clicked', lambda *_: self.destroy())
+        body.pack_start(self.close_button, False, False, 0)
+        self.show_all()
+        self.close_button.hide()
+        self.install.set_fraction(0)
+        self.download.set_fraction(0)
+
+        active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet',
+                                 'rice-update.service'], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL).returncode == 0
+        if not active:
+            update_check.write_progress(phase='download', task='Starting update', done=0, total=0)
+            result = subprocess.run(['systemctl', '--user', 'start', '--no-block',
+                                     'rice-update.service'], capture_output=True, text=True)
+            if result.returncode:
+                update_check.write_progress(phase='failed',
+                    task=(result.stderr.strip() or 'Could not start the update service')[:180],
+                    done=0, total=0)
+        GLib.timeout_add(180, self.refresh)
+
+    def add_stage(self, body, title):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
+        box.get_style_context().add_class('progress-stage')
+        body.pack_start(box, False, False, 0)
+        box.pack_start(label(title, 'row-title'), False, False, 0)
+        heading = Gtk.Box(spacing=8)
+        box.pack_start(heading, False, False, 0)
+        task = label('Waiting', 'subtitle')
+        amount = label('', 'value')
+        heading.pack_start(task, True, True, 0)
+        heading.pack_end(amount, False, False, 0)
+        bar = Gtk.ProgressBar()
+        box.pack_start(bar, False, False, 0)
+        return bar, task, amount
+
+    def set_bar(self, bar, amount, done, total, pulse=False):
+        if total > 0:
+            ratio = min(1.0, max(0.0, done / total))
+            bar.set_fraction(ratio)
+            amount.set_text(f'{done}/{total}')
+        elif pulse:
+            bar.pulse()
+            amount.set_text('Working')
+        else:
+            bar.set_fraction(0)
+            amount.set_text('Waiting')
+
+    def refresh(self):
+        state = update_check.read_progress()
+        phase = state.get('phase')
+        task = str(state.get('task') or '')
+        done = max(0, int(state.get('done') or 0))
+        total = max(0, int(state.get('total') or 0))
+        if phase == 'download':
+            self.download_task.set_text(task or 'Checking for update files')
+            self.set_bar(self.download, self.download_amount, done, total, pulse=not total)
+            self.install_task.set_text('Waiting for download')
+            self.outcome.set_text('Downloading update files…')
+        elif phase == 'install':
+            self.download_task.set_text('Downloaded')
+            self.set_bar(self.download, self.download_amount, 1, 1)
+            self.install_task.set_text(task or 'Installing')
+            self.set_bar(self.install, self.install_amount, done, total, pulse=not total)
+            self.outcome.set_text('Installing… this window will stay open until the result is known.')
+        elif phase in ('complete', 'failed'):
+            if phase == 'complete':
+                self.download_task.set_text('Downloaded')
+                self.install_task.set_text('Installed')
+                self.set_bar(self.download, self.download_amount, 1, 1)
+                self.set_bar(self.install, self.install_amount, 5, 5)
+                self.outcome.set_text('Update installed successfully.')
+            else:
+                self.outcome.set_text('Update failed: ' + (task or 'Unknown error'))
+            self.finished = True
+            self.close_button.show()
+            return False
+        if time.monotonic() - self.started > 8 and not state:
+            self.outcome.set_text('Waiting for the update service…')
+        return True
+
+    def on_key(self, _widget, event):
+        if event.keyval == Gdk.KEY_Escape:
+            if self.finished:
+                self.destroy()
+            return True
+        return False
+
+
+def main():
+    update_check.STATE.mkdir(parents=True, exist_ok=True)
+    lock = (update_check.STATE / 'update-progress-window.lock').open('w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    Gtk.init([])
+    Gtk.Settings.get_default().set_property('gtk-icon-theme-name', 'Adwaita')
+    Gtk.Settings.get_default().set_property('gtk-application-prefer-dark-theme', True)
+    css = Gtk.CssProvider()
+    css.load_from_path(str(library / 'panels.css'))
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    window = ProgressWindow()
+    window.connect('destroy', Gtk.main_quit)
+    window.present()
+    Gtk.main()
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

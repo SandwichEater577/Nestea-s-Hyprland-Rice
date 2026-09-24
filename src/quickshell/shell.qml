@@ -27,7 +27,7 @@ ShellRoot {
     property string timeFormat: "24h"
     property string kickPath: Quickshell.env("HOME") + "/.local/state/rice/status-kick"
     property int activeWorkspace: 0
-    property int extraWorkspace: 0
+    property var visibleWorkspaces: [1, 2, 3, 4, 5]
     property var workspaceAttention: []
 
     function applyState(line) {
@@ -104,7 +104,7 @@ ShellRoot {
                 try {
                     var s = JSON.parse(data)
                     root.activeWorkspace = s.active || 0
-                    root.extraWorkspace = s.extra || 0
+                    root.visibleWorkspaces = s.visible || [1, 2, 3, 4, 5]
                     root.workspaceAttention = s.attention || []
                 } catch (e) { console.warn("workspace JSON: " + e) }
             }
@@ -233,36 +233,23 @@ ShellRoot {
                     anchors.centerIn: parent
                     spacing: 2
                     Repeater {
-                        model: 5
+                        model: root.visibleWorkspaces
                         BarButton {
-                            required property int index
-                            label: String(index + 1)
+                            required property int modelData
+                            label: String(modelData)
                             minimumWidth: 39
                             implicitHeight: 22
                             radius: 5
-                            active: root.activeWorkspace === index + 1
-                            attention: root.workspaceAttention.indexOf(index + 1) !== -1
+                            active: root.activeWorkspace === modelData
+                            attention: root.workspaceAttention.indexOf(modelData) !== -1
                             ink: active ? root.palette.accent_foreground : attention ? root.palette.accent : root.palette.muted
                             activeColor: root.palette.accent
                             hoverColor: root.palette.hover; pal: root.palette
                             // Hyprland ≥0.56 evaluates dispatchers as Lua:
                             // "hl.dsp.focus" is the working form here (plain
                             // "workspace N" errors with a parse exception).
-                            onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + (index + 1) + "})")
+                            onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + modelData + "})")
                         }
-                    }
-                    BarButton {
-                        visible: root.extraWorkspace > 5
-                        label: String(root.extraWorkspace)
-                        minimumWidth: 39
-                        implicitHeight: 22
-                        radius: 5
-                        active: root.activeWorkspace === root.extraWorkspace
-                        attention: root.workspaceAttention.indexOf(root.extraWorkspace) !== -1
-                        ink: active ? root.palette.accent_foreground : attention ? root.palette.accent : root.palette.muted
-                        activeColor: root.palette.accent
-                        hoverColor: root.palette.hover; pal: root.palette
-                        onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + root.extraWorkspace + "})")
                     }
                 }
             }

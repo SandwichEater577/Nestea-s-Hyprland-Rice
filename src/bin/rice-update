@@ -19,14 +19,17 @@ def main(argv):
     if mode not in ('apply', '--apply', 'update'):
         print('usage: rice-update [apply|check]', file=sys.stderr)
         return 2
+    update_check.write_progress(phase='download', task='Starting update', done=0, total=0)
     update_check.notify('Rice update', 'Downloading the latest rice…',
                         icon='software-update-available-symbolic')
     try:
-        subject = update_check.apply()
+        subject = update_check.apply(progress=update_check.write_progress)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        update_check.write_progress(phase='failed', task=str(exc).splitlines()[0][:160], done=0, total=0)
         update_check.notify('Rice update failed', str(exc).splitlines()[0][:160])
         print(exc, file=sys.stderr)
         return 1
+    update_check.write_progress(phase='complete', task='Update installed', done=1, total=1)
     update_check.notify('Rice updated', subject or 'The rice is up to date')
     return 0
 

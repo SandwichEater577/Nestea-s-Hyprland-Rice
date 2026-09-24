@@ -553,7 +553,7 @@ class Panel(Gtk.ApplicationWindow):
             # The row exists only while an update is still new; Ignore flips it
             # out of sight and the update stays in Update history.
             sha,entry=waiting[0]
-            detail=entry.get('summary') or 'New commits ready'
+            detail=update_check.display_name(entry)
             if len(waiting)>1:detail=f"{len(waiting)} new updates · {detail}"
             # Ignore sits beside Download, not inside it: one button cannot
             # contain another, and it needs its own click target.
@@ -807,7 +807,8 @@ class UpdatesOverlay(Gtk.Window):
             if entry.get('applied'):status='applied '+update_check.ago(entry['applied'])
             elif entry.get('new'):status='new · waiting under Download update'
             else:status='ignored · still downloadable'
-            make_row(self.body,entry.get('summary') or 'Rice update',f'{tag} · {status}',
+            name=update_check.display_name(entry)
+            make_row(self.body,name,f'{tag} · {status}',
                      'software-update-available-symbolic',lambda s=sha:self.detail(s),wrap_title=True,
                      subtitle_emphasis='ignored' if not entry.get('applied') and not entry.get('new') else None)
         self.body.show_all()
@@ -819,11 +820,11 @@ class UpdatesOverlay(Gtk.Window):
         self.scroller.set_min_content_height(260)
         state=update_check.status()
         entry=dict(state['updates'].get(sha) or {})
-        summary=(entry.get('summary') or (state.get('subject') or '').strip() or 'Rice update')
+        summary=update_check.display_name(entry) if entry else (state.get('subject') or '').strip() or 'Rice update'
         tag='(optional)' if entry.get('kind')=='optional' else '(recommended)'
         self.heading.set_text('Update details')
         self.back.show()
-        meta=tag+(f' · {sha}' if sha else '')
+        meta=tag+(f' · {entry.get("id") or sha}' if sha else '')
         if entry.get('when'):meta+=f' · published {update_check.ago(entry["when"])}'
         self.body.pack_start(make_label(meta,'subtitle'),False,False,0)
         self.body.pack_start(make_wrap_label(summary,'row-title'),False,False,0)
@@ -836,21 +837,31 @@ class UpdatesOverlay(Gtk.Window):
         actions.set_homogeneous(True)
         self.body.pack_start(actions,False,False,0)
         if not entry.get('applied'):
-            make_action_button(actions,'Download',self.download,primary=True)
-        make_action_button(actions,'Close',self.destroy)
+            make_action_button(actions,'Install',self.download,primary=True)
+        make_action_button(actions,'Cancel' if not entry.get('applied') else 'Close',self.destroy)
         self.body.show_all()
         self.footer.set_text('Esc to close')
 
     def download(self):
-        # The installer restarts rice-controls, so the pull runs in its own
-        # on-demand service instead of inside this window.
+        # This separate GTK process survives the installer's restart of
+        # rice-controls and keeps the progress window on screen until done.
         try:
-            backend.run('systemctl','--user','start','--no-block','rice-update.service',check=True)
+            process=subprocess.Popen([str(Path.home()/'.local/bin/rice-update-progress')],
+                                     start_new_session=True,stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
         except Exception as exc:
             self.feedback.set_text(str(exc).splitlines()[0][:160])
             self.feedback.show()
             return
-        self.destroy()
+        self.feedback.set_text('Opening install progress…')
+        self.feedback.show()
+        def handoff():
+            if process.poll() is None:
+                self.destroy()
+            else:
+                self.feedback.set_text('Could not open the install progress window')
+            return False
+        GLib.timeout_add(500,handoff)
 
 
 class App(Gtk.Application):

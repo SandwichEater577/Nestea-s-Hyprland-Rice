@@ -22,19 +22,25 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import subprocess
 import time
+from collections import deque
 
 HOME = Path.home()
 SOURCE = HOME / '.local/share/rice/source'
 STATE = HOME / '.local/state/rice'
 FILE = STATE / 'update.json'
+PROGRESS_FILE = STATE / 'update-progress.json'
 PUBLIC = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice.git'
 ISSUES = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice/issues/new'
 CHECK_SECONDS = 1800
 KINDS = ('optional', 'recommended')
 HISTORY = 20  # installed commits kept described in the Update history window
-TRAILER = re.compile(r'^Rice-Update-(Summary|Detail|Kind):[ \t]*(.*)$')
+TRAILER = re.compile(r'^Rice-Update-(Summary|Detail|Kind|ID):[ \t]*(.*)$')
+UPDATE_ID = re.compile(r'^0x[0-9a-fA-F]{5}$')
+GIT_PROGRESS = re.compile(r'(Receiving objects|Resolving deltas):\s*\d+%\s*\((\d+)/(\d+)\)')
+INSTALL_STEP = re.compile(r'^RICE_PROGRESS_STEP=(\d+)\t(.*)$')
 
 
 class UpdateError(RuntimeError):
@@ -61,6 +67,62 @@ def _out(args, check=True, timeout=45):
     return (result.stdout or '').strip()
 
 
+def _run_stream(command, timeout, on_line=None, cwd=None, env=None):
+    """Run a command without hiding its carriage-return progress or losing timeouts."""
+    process = subprocess.Popen(command, cwd=cwd, env=env or _env(),
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    recent = deque(maxlen=20)
+    pending = b''
+    deadline = time.monotonic() + timeout
+
+    def accept(raw):
+        line = raw.decode('utf-8', 'replace').strip()
+        if line:
+            recent.append(line)
+            if on_line:
+                on_line(line)
+
+    try:
+        while True:
+            if time.monotonic() >= deadline:
+                raise UpdateError(f'{command[0]} timed out')
+            ready, _, _ = select.select([process.stdout], [], [], 0.2)
+            if not ready:
+                continue
+            chunk = os.read(process.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            parts = re.split(b'[\r\n]', pending + chunk)
+            pending = parts.pop()
+            for part in parts:
+                accept(part)
+        if pending:
+            accept(pending)
+        if process.wait(timeout=max(1, deadline - time.monotonic())):
+            raise UpdateError(recent[-1] if recent else f'{command[0]} failed')
+    except (OSError, subprocess.TimeoutExpired):
+        raise UpdateError(f'{command[0]} failed or timed out')
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stdout.close()
+
+
+def read_progress():
+    try:
+        return json.loads(PROGRESS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def write_progress(**fields):
+    STATE.mkdir(parents=True, exist_ok=True)
+    temp = PROGRESS_FILE.with_suffix('.tmp')
+    temp.write_text(json.dumps(dict(fields, at=time.time())) + '\n')
+    temp.replace(PROGRESS_FILE)
+
+
 def notify(title, body, icon='dialog-information-symbolic', urgency=None):
     args = ['notify-send', '-a', 'Rice', '-i', icon]
     if urgency:
@@ -76,12 +138,18 @@ def pending_updates(state):
     return found
 
 
+def display_name(entry):
+    summary = entry.get('summary') or 'Rice update'
+    identifier = entry.get('id') or ''
+    return summary if not identifier or summary.startswith(identifier + ' ') else identifier + ' · ' + summary
+
+
 def notify_update(state):
     # Urgency critical keeps the message on screen until it is dismissed; a five
     # second toast is too easy to miss for something that happens once a week.
     waiting = pending_updates(state)
     count = len(waiting)
-    summary = (waiting[0][1].get('summary') if waiting else '') or (state.get('subject') or '').strip()
+    summary = (display_name(waiting[0][1]) if waiting else '') or (state.get('subject') or '').strip()
     detail = f"{count} new commit{'s' if count != 1 else ''}" if count else 'New commits ready'
     if summary:
         detail += ' · ' + (summary if len(summary) <= 60 else summary[:57] + '…')
@@ -112,7 +180,7 @@ def status():
     for entry in state['updates'].values():
         if not isinstance(entry, dict):
             continue
-        for key, default in (('new', False), ('summary', ''), ('detail', ''),
+        for key, default in (('new', False), ('summary', ''), ('detail', ''), ('id', ''),
                              ('kind', 'recommended'), ('applied', 0), ('when', 0)):
             entry.setdefault(key, default)
         if entry['kind'] not in KINDS:
@@ -174,6 +242,11 @@ def _describe(body, meta):
     return summary, detail, (kind if kind in KINDS else 'recommended')
 
 
+def _update_id(body, meta):
+    value = str((meta or {}).get('id') or _trailers(body).get('ID') or '').strip()
+    return value.lower() if UPDATE_ID.fullmatch(value) else ''
+
+
 def _make(sha, when, body, meta, new, applied=0):
     summary, detail, kind = _describe(body, meta)
     try:
@@ -181,6 +254,7 @@ def _make(sha, when, body, meta, new, applied=0):
     except (TypeError, ValueError):
         when = 0.0
     return {'new': bool(new), 'summary': summary, 'detail': detail, 'kind': kind,
+            'id': _update_id(body, meta),
             'applied': float(applied or 0), 'when': when}
 
 
@@ -255,12 +329,15 @@ def check():
             if sha not in updates:
                 updates[sha] = _make(sha, when, body, local_catalog.get(sha),
                                      new=False, applied=when)
+            elif not updates[sha].get('id'):
+                updates[sha]['id'] = _update_id(body, local_catalog.get(sha))
         # Every fetched commit that is still ahead stays or becomes an entry.
         catalog = _catalog('FETCH_HEAD')
         for sha, when, body in pending:
             meta = catalog.get(sha)
             if sha in updates:
                 entry = updates[sha]
+                entry['id'] = _update_id(body, meta)
                 if isinstance(meta, dict):
                     summary, detail, kind = _describe(body, meta)
                     entry.update(summary=summary, detail=detail, kind=kind)
@@ -288,21 +365,43 @@ def check():
     return save(state)
 
 
-def apply():
-    """Pull the checkout, redeploy it and clear the cached update."""
+def apply(progress=None):
+    """Fetch, install and report only measured transfer and completed stages."""
     if not (SOURCE / '.git').exists():
         raise UpdateError('Rice sources are not a Git checkout')
-    _out(['pull', '--ff-only', 'origin', branch()], timeout=300)
+    def report(**fields):
+        if progress:
+            progress(**fields)
+
+    report(phase='download', task='Checking for update files', done=0, total=0)
+
+    def git_line(line):
+        match = GIT_PROGRESS.search(line)
+        if match:
+            operation, done, total = match[1], int(match[2]), int(match[3])
+            report(phase='download', task=operation, done=done, total=total)
+
+    _run_stream(['git', '-C', str(SOURCE), 'fetch', '--progress', '--no-tags',
+                 'origin', branch()], timeout=300, on_line=git_line)
+    report(phase='download', task='Download complete', done=1, total=1)
+    report(phase='install', task='Applying Git changes', done=0, total=5)
+    _out(['merge', '--ff-only', 'FETCH_HEAD'], timeout=300)
+    report(phase='install', task='Applying local settings', done=1, total=5)
     installer = SOURCE / 'Installer'
     if not installer.exists():
         raise UpdateError('Installer missing from the checkout')
     command = [str(installer)] if os.access(installer, os.X_OK) else ['bash', str(installer)]
-    result = subprocess.run(command + ['--install'], cwd=str(SOURCE), capture_output=True,
-                            text=True, timeout=1800, env=_env())
-    if result.returncode:
-        lines = [line for line in ((result.stdout or '') + '\n' + (result.stderr or '')).splitlines()
-                 if line.strip()]
-        raise UpdateError(lines[-1][:160] if lines else 'Installer failed')
+
+    def install_line(line):
+        match = INSTALL_STEP.match(line)
+        if match:
+            step = int(match[1])
+            report(phase='install', task=match[2], done=min(step, 5), total=5)
+
+    install_env = _env()
+    install_env['RICE_UPDATE_PROGRESS'] = '1'
+    _run_stream(command + ['--install'], cwd=str(SOURCE), timeout=1800,
+                env=install_env, on_line=install_line)
     subject = _out(['log', '-1', '--format=%s'], check=False)
     state = status()
     _mark_installed(state)

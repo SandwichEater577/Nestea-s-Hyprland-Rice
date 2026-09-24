@@ -6,7 +6,12 @@ dry=${1:-}
 source "$repo/src/installer/monitors.sh"
 if [[ $dry == --monitors ]]; then rice_monitors_generate; exit 0; fi
 
-step() { printf '\n\033[1m[%s]\033[0m %s\n' "$1" "$2"; }
+step() {
+    if [[ ${RICE_UPDATE_PROGRESS:-} == 1 ]]; then
+        printf 'RICE_PROGRESS_STEP=%s\t%s\n' "$1" "$2" >&2
+    fi
+    printf '\n\033[1m[%s]\033[0m %s\n' "$1" "$2"
+}
 plan() { if [[ $dry == --dry-run ]]; then printf '  would %s\n' "$*"; return 0; fi; }
 
 step 1 'Source and private settings'

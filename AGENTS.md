@@ -49,7 +49,7 @@ State lives in `~/.local/state/rice/update.json`:
 ```json
 {
   "updates": {
-    "56e5b3eb3dba": {"new": false, "summary": "...", "detail": "...",
+    "56e5b3eb3dba": {"new": false, "summary": "...", "detail": "...", "id": "",
                      "kind": "recommended", "applied": 1790204532, "when": 1790204500}
   },
   "available": false, "count": 0, "subject": "...", "sha": "...",
@@ -68,10 +68,10 @@ State lives in `~/.local/state/rice/update.json`:
   are centered `UpdatesOverlay` windows — separate surfaces, like floating terminals, not panel
   pages. Only one surface may hold the exclusive keyboard grab; `App.open_updates()` closes the
   panel first.
-- Clicking **Download update** closes Settings (and an open updates window), then shows the detail
-  overlay with the long description. Its **Download** button starts `rice-update.service`, which
-  runs `git pull --ff-only` + `./Installer --install`, marks entries `applied`, and restarts
-  services (including `rice-controls`, so the panel itself restarts mid-download).
+- Clicking **Download update** closes Settings and shows the detail overlay. **Install** launches
+  `rice-update-progress`, a separate GTK process that survives `rice-controls` restarting. It
+  starts `rice-update.service` and shows measured Git transfer counts and installer stages until
+  success or failure. **Cancel** closes the detail overlay without installing.
 
 ### Describing an update
 
@@ -89,11 +89,14 @@ Trailers (final paragraph of the commit message):
 Rice-Update-Summary: 1-10 word description
 Rice-Update-Detail: longer sentence shown in the detail overlay
 Rice-Update-Kind: optional | recommended
+Rice-Update-ID: 0x00002
 ```
 
 A commit cannot know its own id, so `src/data/updates.json` describes **earlier** commits
 (enrich them in a later commit); the trailers carry the fresh commit's metadata. Summary is what
 the list window shows; detail is what the overlay expands to.
+Number new updates with a five-digit hexadecimal ID in `Rice-Update-ID`, starting at `0x00001`
+for commit `27843e5`; increment by one for each subsequent shipped update.
 
 ## Shipping a change: exact checklist
 

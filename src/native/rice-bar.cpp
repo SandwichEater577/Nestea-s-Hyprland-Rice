@@ -2,6 +2,8 @@
 #include <gtk-layer-shell.h>
 #include <json-glib/json-glib.h>
 #include <functional>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -25,7 +27,8 @@ static int rice_luma_u8(int r, int g, int b) { return (54*r + 183*g + 19*b) >> 8
 
 static std::string home;
 static GtkWidget *audio_label, *network_label, *display_label, *bluetooth_label, *battery_label, *spotify_box, *cover_event, *cover_image;
-static GtkWidget *spotify_label, *repeat_label, *shuffle_label, *workspaces[6];
+static GtkWidget *spotify_label, *repeat_label, *shuffle_label, *workspace_center;
+static std::map<int, GtkWidget*> workspaces;
 static GtkCssProvider *theme_provider;
 
 static std::string read_file(const std::string &path) {
@@ -188,12 +191,32 @@ static void update_status(const std::string &status) {
     }
 }
 
+static void add_workspace(int id) {
+    GtkWidget *event = gtk_event_box_new();
+    gtk_widget_set_name(event, "workspace-idle");
+    GtkWidget *label = gtk_label_new(std::to_string(id).c_str());
+    gtk_container_add(GTK_CONTAINER(event), label);
+    gtk_widget_set_size_request(event, 39, 22);
+    gtk_widget_set_margin_top(label, 3);
+    gtk_widget_set_margin_bottom(label, 3);
+    g_object_set_data(G_OBJECT(event), "workspace", GINT_TO_POINTER(id));
+    g_signal_connect(event, "button-press-event", G_CALLBACK(+[](GtkWidget *w, GdkEventButton*, gpointer) -> gboolean {
+        launch({"hyprctl", "dispatch",
+                "hl.dsp.focus({workspace=" + std::to_string(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "workspace"))) + "})"});
+        return TRUE;
+    }), nullptr);
+    gtk_box_pack_start(GTK_BOX(workspace_center), event, FALSE, FALSE, 0);
+    gtk_widget_show_all(event);
+    workspaces[id] = event;
+}
+
 static void update_workspace(const std::string &state) {
     JsonParser *parser = parse(state);
     if (!parser) return;
     JsonObject *data = json_node_get_object(json_parser_get_root(parser));
     int active = json_object_get_int_member_with_default(data, "active", 0);
-    int extra = json_object_get_int_member_with_default(data, "extra", 0);
+    JsonArray *visible = json_object_has_member(data, "visible")
+        ? json_object_get_array_member(data, "visible") : nullptr;
     JsonArray *attention = json_object_has_member(data, "attention")
         ? json_object_get_array_member(data, "attention") : nullptr;
     auto needs_attention = [attention](int id) {
@@ -202,16 +225,29 @@ static void update_workspace(const std::string &state) {
             if (json_array_get_int_element(attention, i) == id) return true;
         return false;
     };
-    for (int i = 0; i < 6; ++i) {
-        int id = i == 5 ? extra : i + 1;
-        gtk_widget_set_name(workspaces[i], id == active ? "workspace-active" :
+    std::set<int> wanted{1, 2, 3, 4, 5};
+    if (visible) {
+        for (guint i = 0; i < json_array_get_length(visible); ++i) {
+            int id = json_array_get_int_element(visible, i);
+            if (id > 0) wanted.insert(id);
+        }
+    }
+    if (active > 0) wanted.insert(active);
+    for (auto it = workspaces.begin(); it != workspaces.end();) {
+        if (!wanted.count(it->first)) {
+            gtk_widget_destroy(it->second);
+            it = workspaces.erase(it);
+        } else ++it;
+    }
+    for (int id : wanted) {
+        if (!workspaces.count(id)) add_workspace(id);
+    }
+    int position = 0;
+    for (auto [id, widget] : workspaces) {
+        gtk_box_reorder_child(GTK_BOX(workspace_center), widget, position++);
+        gtk_widget_set_name(widget, id == active ? "workspace-active" :
             needs_attention(id) ? "workspace-attention" : "workspace-idle");
     }
-    if (extra > 5) {
-        g_object_set_data(G_OBJECT(workspaces[5]), "workspace", GINT_TO_POINTER(extra));
-        gtk_label_set_text(GTK_LABEL(gtk_bin_get_child(GTK_BIN(workspaces[5]))), std::to_string(extra).c_str());
-    }
-    gtk_widget_set_visible(workspaces[5], extra > 5);
     g_object_unref(parser);
 }
 
@@ -350,28 +386,12 @@ int main(int argc, char **argv) {
         if (GTK_IS_LABEL(label)) gtk_widget_set_margin_end(label, 8);
     }, nullptr);
     GtkWidget *center = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+    workspace_center = center;
     gtk_widget_set_name(center, "rice-group-center"); gtk_widget_set_halign(center, GTK_ALIGN_CENTER); gtk_widget_set_valign(center, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request(center, -1, 31);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), center);
-    for (int i=0; i<6; i++) {
-        workspaces[i] = gtk_event_box_new();
-        gtk_widget_set_name(workspaces[i], "workspace-idle");
-        GtkWidget *label = gtk_label_new(std::to_string(i+1).c_str());
-        gtk_container_add(GTK_CONTAINER(workspaces[i]), label);
-        gtk_widget_set_size_request(workspaces[i], 39, 22);
-        gtk_widget_set_margin_top(label, 3);
-        gtk_widget_set_margin_bottom(label, 3);
-        g_object_set_data(G_OBJECT(workspaces[i]), "workspace", GINT_TO_POINTER(i+1));
-        g_signal_connect(workspaces[i], "button-press-event", G_CALLBACK(+[](GtkWidget *w, GdkEventButton*, gpointer) -> gboolean {
-            // Hyprland >=0.56 evaluates dispatchers as Lua; plain
-            // "workspace N" fails there, "hl.dsp.focus" works.
-            launch({"hyprctl", "dispatch",
-                    "hl.dsp.focus({workspace=" + std::to_string(GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "workspace"))) + "})"}); return TRUE;
-        }), nullptr);
-        gtk_box_pack_start(GTK_BOX(center), workspaces[i], FALSE, FALSE, 0);
-    }
+    for (int i = 1; i <= 5; ++i) add_workspace(i);
     gtk_widget_show_all(window);
-    gtk_widget_hide(workspaces[5]);
     apply_palette();
     std::thread(watch_status).detach();
     std::thread(watch_workspaces).detach();
