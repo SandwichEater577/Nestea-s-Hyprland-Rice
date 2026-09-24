@@ -8,6 +8,7 @@ import re
 import subprocess as sp
 import sys
 import time
+import audio_routes
 
 HOME = Path.home()
 STATE = HOME / '.local/state/rice'
@@ -69,10 +70,12 @@ def audio(action):
         return
     while True:
         sinks = json.loads(run('pactl', '-f', 'json', 'list', 'sinks', check=True))
+        cards = json.loads(run('pactl', '-f', 'json', 'list', 'cards', check=True))
         default = run('pactl', 'get-default-sink')
-        labels = ['Mute / unmute', 'Volume…', 'Ceiling: ' + ('150% — lock to 100%' if BOOST.exists() else '100% — enable 150%'), 'Application volumes…']
-        labels += [('● ' if s['name'] == default else '○ ') + s.get('description', s['name']) for s in sinks]
-        order = list(range(4, len(labels))) + list(range(4))
+        routes = audio_routes.choices(sinks, cards, default)
+        labels = ['Mute / unmute', 'Volume…', 'Ceiling: ' + ('150% — lock to 100%' if BOOST.exists() else '100% — enable 150%'), 'Application volumes…', 'Microphone…']
+        labels += [('● ' if route['selected'] else '○ ') + route['title'] + ' · ' + route['detail'] for route in routes]
+        order = list(range(5, len(labels))) + list(range(5))
         selected = menu('Sound', [labels[n] for n in order], message='SOUND  /  Output and volume')
         i = order[selected] if selected is not None else None
         if i is None: return
@@ -90,15 +93,20 @@ def audio(action):
                 values = [0, 25, 50, 75, 100]
                 v = menu('Application volume', [f'{v}%' for v in values])
                 if v is not None: run('pactl', 'set-sink-input-volume', streams[a]['index'], f'{values[v]}%', check=True)
+        elif i == 4:
+            sources = json.loads(run('pactl', '-f', 'json', 'list', 'sources', check=True))
+            inputs = audio_routes.input_choices(sources, run('pactl', 'get-default-source'))
+            active = next((route for route in inputs if route['selected']), None)
+            options = [('Unmute' if active['muted'] else 'Mute') + ' microphone'] if active else []
+            options += [('● ' if route['selected'] else '○ ') + route['title'] for route in inputs]
+            chosen = menu('Microphone', options)
+            if chosen is None: continue
+            if active and chosen == 0:
+                run('pactl', 'set-source-mute', '@DEFAULT_SOURCE@', '0' if active['muted'] else '1', check=True)
+            else:
+                audio_routes.select_input(inputs[chosen - (1 if active else 0)], run)
         else:
-            sink = sinks[i-4]['name']
-            run('pactl', 'set-default-sink', sink, check=True)
-            streams = json.loads(run('pactl', '-f', 'json', 'list', 'sink-inputs', check=True))
-            for stream in streams:
-                run('pactl', 'move-sink-input', stream['index'], sink, check=True)
-            if not BOOST.exists():
-                value = run('wpctl', 'get-volume', SINK)
-                if value and float(value.split()[1]) > 1: run('wpctl', 'set-volume', SINK, '1.0')
+            audio_routes.select(routes[i-5], run, BOOST.exists())
 
 def nm(*args, **kwargs):
     return run('nmcli', *args, **kwargs)

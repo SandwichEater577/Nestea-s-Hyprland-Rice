@@ -94,6 +94,8 @@ Check or apply from a terminal with `rice-update check` and `rice-update apply`.
 
 The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The clock and battery show information without click actions. The media cover opens the Media page; hover shows track details. Workspace buttons 1–5 stay visible, along with every workspace containing a window and the current workspace even when empty. A thin outline marks a workspace requesting attention (for example, when Brave opens a tab there from another workspace); visiting it clears the outline. Buttons switch via Hyprland's dispatch API.
 
+The Sound page lists available output routes, including laptop speakers and a wired headset even when the audio card exposes them through separate profiles. Choosing one switches the profile, sets the default output, and moves playing applications. It also shows microphone choices and their mute state; choosing an input moves active capture applications such as Discord and unmutes that input. Switching outputs preserves the current microphone route and mute state.
+
 Check services with `systemctl --user status rice-bar rice-controls rice-hotspot rice-update-watch`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-hotspot -u rice-update-watch -b`. `./Installer --check` reports missing commands.
 
 Local connection data, wallpaper images, caches, keys and screenshots are ignored by Git. Review `git status` before publishing changes.

@@ -15,6 +15,7 @@ import desktop as backend
 import display
 import mpris
 import update_check
+import audio_routes
 from private_data import load_private_data
 
 POOL = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -22,31 +23,20 @@ ROOT = Path(__file__).parent
 CODE = runpy.run_path(str(Path.home()/'.local/bin/vscode-menu'))
 
 
-def friendly_sink(sink):
-    name = sink.get('description', sink['name'])
-    port = sink.get('active_port', '')
-    if isinstance(port, dict): port = port.get('name', '')
-    if 'bluez' in sink['name']: return name, 'Bluetooth audio', 'audio-headphones-symbolic'
-    if 'hdmi' in sink['name'].lower(): return 'Display audio', name, 'video-display-symbolic'
-    if 'headphone' in port: return 'Headphones', 'Built-in headphone jack', 'audio-headphones-symbolic'
-    if 'alsa' in sink['name']: return 'Laptop speakers', 'Built-in audio', 'audio-speakers-symbolic'
-    return name, 'Audio output', 'audio-speakers-symbolic'
-
-
 def sound_data():
-    return dict(sinks=json.loads(backend.run('pactl','-f','json','list','sinks',check=True)),
-                default=backend.run('pactl','get-default-sink'),
+    sinks=json.loads(backend.run('pactl','-f','json','list','sinks',check=True))
+    cards=json.loads(backend.run('pactl','-f','json','list','cards',check=True))
+    default=backend.run('pactl','get-default-sink')
+    sources=json.loads(backend.run('pactl','-f','json','list','sources',check=True))
+    default_source=backend.run('pactl','get-default-source')
+    return dict(routes=audio_routes.choices(sinks,cards,default),
+                inputs=audio_routes.input_choices(sources,default_source),
                 streams=json.loads(backend.run('pactl','-f','json','list','sink-inputs',check=True)),
                 volume=backend.run('wpctl','get-volume',backend.SINK), boost=backend.BOOST.exists())
 
 
-def route_output(name):
-    backend.run('pactl','set-default-sink',name,check=True)
-    for stream in json.loads(backend.run('pactl','-f','json','list','sink-inputs',check=True)):
-        backend.run('pactl','move-sink-input',stream['index'],name,check=True)
-    value=backend.run('wpctl','get-volume',backend.SINK)
-    if not backend.BOOST.exists() and value and float(value.split()[1])>1:
-        backend.run('wpctl','set-volume',backend.SINK,'1.0',check=True)
+def route_output(route):
+    audio_routes.select(route,backend.run,backend.BOOST.exists())
 
 
 def wifi_data():
@@ -411,9 +401,21 @@ class Panel(Gtk.ApplicationWindow):
         self.switch_row(group,'Mute','', 'MUTED' in volume,lambda state:self.work(lambda:backend.run('wpctl','set-mute',backend.SINK,'1' if state else '0',check=True)),'audio-volume-muted-symbolic')
         self.switch_row(group,'Volume boost','Allow volume above 100%',data['boost'],lambda state:self.work(lambda:backend.audio('boost')),'audio-volume-high-symbolic')
         outputs=self.section('Output device')
-        for sink in data['sinks']:
-            name,detail,icon=friendly_sink(sink)
-            self.row(outputs,name,detail,icon,lambda s=sink:self.work(lambda:route_output(s['name'])),sink['name']==data['default'])
+        for route in data['routes']:
+            self.row(outputs,route['title'],route['detail'],route['icon'],
+                     lambda r=route:self.work(lambda:route_output(r)),route['selected'])
+        if data['inputs']:
+            inputs=self.section('Microphone')
+            selected=next((route for route in data['inputs'] if route['selected']),None)
+            if selected:
+                self.switch_row(inputs,'Mute microphone','Discord and other apps cannot hear you while muted',
+                                selected['muted'],
+                                lambda state:self.work(lambda:backend.run('pactl','set-source-mute','@DEFAULT_SOURCE@',
+                                                                           '1' if state else '0',check=True)),
+                                'audio-input-microphone-symbolic')
+            for route in data['inputs']:
+                self.row(inputs,route['title'],route['detail'],route['icon'],
+                         lambda r=route:self.work(lambda:audio_routes.select_input(r,backend.run)),route['selected'])
         if data['streams']:
             apps=self.section('Applications')
             for stream in data['streams']:
