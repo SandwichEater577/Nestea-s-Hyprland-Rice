@@ -764,6 +764,7 @@ class UpdatesOverlay(Gtk.Window):
         self.scroller.set_policy(Gtk.PolicyType.NEVER,Gtk.PolicyType.AUTOMATIC)
         self.scroller.set_propagate_natural_height(True)
         monitor=self.get_display().get_primary_monitor() or self.get_display().get_monitor(0)
+        self.scroller.set_min_content_height(240)
         self.scroller.set_max_content_height(max(240,min(640,monitor.get_geometry().height-200)))
         self.layout.pack_start(self.scroller,True,True,0)
         self.body=Gtk.Box(orientation=Gtk.Orientation.VERTICAL,spacing=8)
@@ -791,6 +792,7 @@ class UpdatesOverlay(Gtk.Window):
     def history(self):
         """Every known update, newest first, with its (optional)/(recommended) tag."""
         self.reset()
+        self.scroller.set_min_content_height(400)
         self.heading.set_text('Update history')
         self.back.hide()
         state=update_check.status()
@@ -810,6 +812,7 @@ class UpdatesOverlay(Gtk.Window):
     def detail(self,sha):
         """One update: summary, the long description and the download action."""
         self.reset()
+        self.scroller.set_min_content_height(260)
         state=update_check.status()
         entry=dict(state['updates'].get(sha) or {})
         summary=(entry.get('summary') or (state.get('subject') or '').strip() or 'Rice update')

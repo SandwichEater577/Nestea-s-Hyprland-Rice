@@ -26,6 +26,9 @@ ShellRoot {
     property var palette: ({background: "#161616", foreground: "#e4e4e4", border: "#3b3b3b", muted: "#a3a3a3", accent: "#dedede", accent_foreground: "#181818", hover: "#303030"})
     property string timeFormat: "24h"
     property string kickPath: Quickshell.env("HOME") + "/.local/state/rice/status-kick"
+    property int activeWorkspace: 0
+    property int extraWorkspace: 0
+    property var workspaceAttention: []
 
     function applyState(line) {
         if (!line || line.charAt(0) !== "{") return
@@ -92,6 +95,23 @@ ShellRoot {
         onExited: statusRestart.restart()
     }
     Timer { id: statusRestart; interval: 1000; onTriggered: statusStream.running = true }
+    Process {
+        id: workspaceStream
+        command: [Quickshell.env("HOME") + "/.local/bin/rice-workspace", "--stream"]
+        running: true
+        stdout: SplitParser {
+            onRead: data => {
+                try {
+                    var s = JSON.parse(data)
+                    root.activeWorkspace = s.active || 0
+                    root.extraWorkspace = s.extra || 0
+                    root.workspaceAttention = s.attention || []
+                } catch (e) { console.warn("workspace JSON: " + e) }
+            }
+        }
+        onExited: workspaceRestart.restart()
+    }
+    Timer { id: workspaceRestart; interval: 1000; onTriggered: workspaceStream.running = true }
     SystemClock { id: clock; precision: SystemClock.Seconds }
 
     Variants {
@@ -220,8 +240,9 @@ ShellRoot {
                             minimumWidth: 39
                             implicitHeight: 22
                             radius: 5
-                            active: Hyprland.focusedWorkspace && Hyprland.focusedWorkspace.id === index + 1
-                            ink: active ? root.palette.accent_foreground : root.palette.muted
+                            active: root.activeWorkspace === index + 1
+                            attention: root.workspaceAttention.indexOf(index + 1) !== -1
+                            ink: active ? root.palette.accent_foreground : attention ? root.palette.accent : root.palette.muted
                             activeColor: root.palette.accent
                             hoverColor: root.palette.hover; pal: root.palette
                             // Hyprland ≥0.56 evaluates dispatchers as Lua:
@@ -229,6 +250,19 @@ ShellRoot {
                             // "workspace N" errors with a parse exception).
                             onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + (index + 1) + "})")
                         }
+                    }
+                    BarButton {
+                        visible: root.extraWorkspace > 5
+                        label: String(root.extraWorkspace)
+                        minimumWidth: 39
+                        implicitHeight: 22
+                        radius: 5
+                        active: root.activeWorkspace === root.extraWorkspace
+                        attention: root.workspaceAttention.indexOf(root.extraWorkspace) !== -1
+                        ink: active ? root.palette.accent_foreground : attention ? root.palette.accent : root.palette.muted
+                        activeColor: root.palette.accent
+                        hoverColor: root.palette.hover; pal: root.palette
+                        onClicked: Hyprland.dispatch("hl.dsp.focus({workspace=" + root.extraWorkspace + "})")
                     }
                 }
             }

@@ -10,6 +10,7 @@ Rectangle {
     property color activeColor: "#dedede"
     property var pal: null          // palette for the tooltip surface
     property bool active: false
+    property bool attention: false
     property int minimumWidth: 0
     property int glyphSize: 12       // media transport glyphs opt into 24
     property int horizontalPadding: parent && parent.objectName === "riceLeftRow" ? 7 : 6
@@ -20,6 +21,8 @@ Rectangle {
     implicitHeight: 26
     radius: 6
     color: active ? activeColor : pointer.containsMouse ? hoverColor : "transparent"
+    border.width: attention && !active ? 1 : 0
+    border.color: activeColor
     Behavior on color { ColorAnimation { duration: 200 } }
     Text {
         id: text

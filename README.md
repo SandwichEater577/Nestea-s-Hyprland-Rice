@@ -80,7 +80,7 @@ Check or apply from a terminal with `rice-update check` and `rice-update apply`.
 
 ## Controls and troubleshooting
 
-The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The media cover opens the Media page; hover shows track details. The workspace buttons switch via Hyprland's dispatch API.
+The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The media cover opens the Media page; hover shows track details. Workspace buttons 1–5 stay visible, and a sixth button shows a workspace above 5 when one is active, occupied, or needs attention. A thin outline marks a workspace requesting attention (for example, when Brave opens a tab there from another workspace); visiting it clears the outline. Buttons switch via Hyprland's dispatch API.
 
 Check services with `systemctl --user status rice-bar rice-controls rice-media-watch rice-hotspot rice-update-watch`. Inspect their logs with `journalctl --user -u rice-bar -u rice-controls -u rice-media-watch -u rice-update-watch -b`. If a chosen engine cannot start, run `ui-backend lua` to return to Waybar. `./Installer --check` reports missing commands.
 

@@ -25,7 +25,7 @@ static int rice_luma_u8(int r, int g, int b) { return (54*r + 183*g + 19*b) >> 8
 
 static std::string home;
 static GtkWidget *audio_label, *network_label, *display_label, *bluetooth_label, *battery_label, *spotify_box, *cover_event, *cover_image;
-static GtkWidget *spotify_label, *repeat_label, *shuffle_label, *workspaces[5];
+static GtkWidget *spotify_label, *repeat_label, *shuffle_label, *workspaces[6];
 static GtkCssProvider *theme_provider;
 
 static std::string read_file(const std::string &path) {
@@ -131,6 +131,8 @@ static void apply_palette() {
         "#rice-media-icon-small { font-size: 16px; }"
         "#workspace-idle { border-radius: 5px; }"
         "#workspace-idle:hover { background: " + val("hover", "#303030") + "; }"
+        "#workspace-attention { border: 1px solid " + accent + "; border-radius: 5px; }"
+        "#workspace-attention label { color: " + accent + "; }"
         "#workspace-active { background: " + accent + "; border-radius: 5px; }"
         "#workspace-active label { color: " + selected_ink + "; }";
     gtk_css_provider_load_from_data(theme_provider, css.c_str(), -1, nullptr);
@@ -186,8 +188,31 @@ static void update_status(const std::string &status) {
     }
 }
 
-static void update_workspace(int id) {
-    for (int i=0; i<5; i++) gtk_widget_set_name(workspaces[i], i + 1 == id ? "workspace-active" : "workspace-idle");
+static void update_workspace(const std::string &state) {
+    JsonParser *parser = parse(state);
+    if (!parser) return;
+    JsonObject *data = json_node_get_object(json_parser_get_root(parser));
+    int active = json_object_get_int_member_with_default(data, "active", 0);
+    int extra = json_object_get_int_member_with_default(data, "extra", 0);
+    JsonArray *attention = json_object_has_member(data, "attention")
+        ? json_object_get_array_member(data, "attention") : nullptr;
+    auto needs_attention = [attention](int id) {
+        if (!attention) return false;
+        for (guint i = 0; i < json_array_get_length(attention); ++i)
+            if (json_array_get_int_element(attention, i) == id) return true;
+        return false;
+    };
+    for (int i = 0; i < 6; ++i) {
+        int id = i == 5 ? extra : i + 1;
+        gtk_widget_set_name(workspaces[i], id == active ? "workspace-active" :
+            needs_attention(id) ? "workspace-attention" : "workspace-idle");
+    }
+    if (extra > 5) {
+        g_object_set_data(G_OBJECT(workspaces[5]), "workspace", GINT_TO_POINTER(extra));
+        gtk_label_set_text(GTK_LABEL(gtk_bin_get_child(GTK_BIN(workspaces[5]))), std::to_string(extra).c_str());
+    }
+    gtk_widget_set_visible(workspaces[5], extra > 5);
+    g_object_unref(parser);
 }
 
 // Persistent pipeline: one bar-status --watch child, one JSON line per change,
@@ -211,69 +236,23 @@ static void watch_status() {
     }
 }
 
-static int active_workspace() {
-    std::string data = capture({"hyprctl", "-j", "activeworkspace"});
-    JsonParser *parser = parse(data);
-    int id = 0;
-    if (parser) {
-        JsonObject *workspace = json_node_get_object(json_parser_get_root(parser));
-        if (json_object_has_member(workspace, "id")) id = json_object_get_int_member(workspace, "id");
-        g_object_unref(parser);
-    }
-    return id;
-}
-
-static void on_workspace_event(const std::string &event) {
-    size_t sep = event.find(">>");
-    if (sep == std::string::npos) return;
-    std::string kind = event.substr(0, sep);
-    if (kind != "workspace" && kind != "workspacev2") return;
-    int id = atoi(event.c_str() + sep + 2);
-    if (id <= 0) return;
-    g_idle_add(+[](gpointer data) -> gboolean {
-        update_workspace(GPOINTER_TO_INT(data));
-        return G_SOURCE_REMOVE;
-    }, GINT_TO_POINTER(id));
-}
-
-// Highlight follows Hyprland's socket2 event stream instead of a 5s poll.
+// One helper turns workspace and urgent socket events into complete bar state.
 static void watch_workspaces() {
-    const char *xdg = g_getenv("XDG_RUNTIME_DIR");
-    const char *signature = g_getenv("HYPRLAND_INSTANCE_SIGNATURE");
-    if (!xdg || !signature) return;
-    std::string path = std::string(xdg) + "/hypr/" + signature + "/.socket2.sock";
+    const std::string command = home + "/.local/bin/rice-workspace --stream";
     for (;;) {
-        sockaddr_un address{};
-        address.sun_family = AF_UNIX;
-        strncpy(address.sun_path, path.c_str(), sizeof(address.sun_path) - 1);
-        int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        bool connected = fd >= 0 &&
-            connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof address) == 0;
-        if (!connected) {
-            if (fd >= 0) close(fd);
-            sleep(2);
-            continue;
-        }
-        int initial = active_workspace();
-        if (initial > 0) {
+        FILE *pipe = popen(command.c_str(), "r");
+        if (!pipe) { sleep(2); continue; }
+        char line[2048];
+        while (fgets(line, sizeof line, pipe)) {
+            auto *payload = new std::string(line);
             g_idle_add(+[](gpointer data) -> gboolean {
-                update_workspace(GPOINTER_TO_INT(data));
+                update_workspace(*static_cast<std::string*>(data));
+                delete static_cast<std::string*>(data);
                 return G_SOURCE_REMOVE;
-            }, GINT_TO_POINTER(initial));
+            }, payload);
         }
-        std::string pending;
-        char buf[4096];
-        ssize_t got;
-        while ((got = read(fd, buf, sizeof buf)) > 0) {
-            pending.append(buf, got);
-            size_t newline;
-            while ((newline = pending.find('\n')) != std::string::npos) {
-                on_workspace_event(pending.substr(0, newline));
-                pending.erase(0, newline + 1);
-            }
-        }
-        close(fd);
-        sleep(2);   // Hyprland restarted or the socket dropped: reconnect
+        pclose(pipe);
+        sleep(2);
     }
 }
 
@@ -374,7 +353,7 @@ int main(int argc, char **argv) {
     gtk_widget_set_name(center, "rice-group-center"); gtk_widget_set_halign(center, GTK_ALIGN_CENTER); gtk_widget_set_valign(center, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request(center, -1, 31);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), center);
-    for (int i=0; i<5; i++) {
+    for (int i=0; i<6; i++) {
         workspaces[i] = gtk_event_box_new();
         gtk_widget_set_name(workspaces[i], "workspace-idle");
         GtkWidget *label = gtk_label_new(std::to_string(i+1).c_str());
@@ -392,6 +371,7 @@ int main(int argc, char **argv) {
         gtk_box_pack_start(GTK_BOX(center), workspaces[i], FALSE, FALSE, 0);
     }
     gtk_widget_show_all(window);
+    gtk_widget_hide(workspaces[5]);
     apply_palette();
     std::thread(watch_status).detach();
     std::thread(watch_workspaces).detach();
