@@ -142,7 +142,7 @@ def make_section(body,title):
     return group
 
 
-def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_title=False):
+def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_title=False,subtitle_emphasis=None):
     row=Gtk.Button() if fn else Gtk.Box()
     row.get_style_context().add_class('device-row')
     if selected:row.get_style_context().add_class('selected')
@@ -153,6 +153,9 @@ def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_ti
     text.pack_start(head,False,False,0)
     if subtitle:
         sub=make_label(subtitle,'subtitle')
+        if subtitle_emphasis and subtitle_emphasis in subtitle:
+            before,word,after=subtitle.partition(subtitle_emphasis)
+            sub.set_markup(GLib.markup_escape_text(before)+f'<b>{GLib.markup_escape_text(word)}</b>'+GLib.markup_escape_text(after))
         sub.set_tooltip_text(subtitle)
         text.pack_start(sub,False,False,0)
     box.pack_start(text,True,True,0)
@@ -805,7 +808,8 @@ class UpdatesOverlay(Gtk.Window):
             elif entry.get('new'):status='new · waiting under Download update'
             else:status='ignored · still downloadable'
             make_row(self.body,entry.get('summary') or 'Rice update',f'{tag} · {status}',
-                     'software-update-available-symbolic',lambda s=sha:self.detail(s),wrap_title=True)
+                     'software-update-available-symbolic',lambda s=sha:self.detail(s),wrap_title=True,
+                     subtitle_emphasis='ignored' if not entry.get('applied') and not entry.get('new') else None)
         self.body.show_all()
         self.footer.set_text(f'{len(entries)} update{"s" if len(entries)!=1 else ""} · Esc to close')
 
