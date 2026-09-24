@@ -23,6 +23,7 @@ class InstallWindow(Gtk.Window):
         GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
         GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
         self.finished = False
+        self.tutorial_ready = False
         self.stage = 0
         self.exit_code = 1
         self.buffer = b''
@@ -66,8 +67,9 @@ class InstallWindow(Gtk.Window):
             body.pack_start(line, False, False, 0)
             self.stages.append((marker, state))
         self.close_button = Gtk.Button(label='Close')
+        self.close_button.set_tooltip_text('Close installation progress after it finishes')
         self.close_button.get_style_context().add_class('secondary')
-        self.close_button.connect('clicked', lambda *_: self.destroy())
+        self.close_button.connect('clicked', self.close)
         body.pack_start(self.close_button, False, False, 0)
         self.show_all()
         self.close_button.hide()
@@ -102,6 +104,8 @@ class InstallWindow(Gtk.Window):
             self.detail.set_text('Compiling locally from C++ source')
         elif line.startswith('Generated '):
             self.detail.set_text('Writing desktop configuration')
+        elif line == 'RICE_TUTORIAL_READY=1':
+            self.tutorial_ready = True
 
     def read_output(self, _fd, _condition):
         chunk = os.read(self.child.stdout.fileno(), 65536)
@@ -123,12 +127,22 @@ class InstallWindow(Gtk.Window):
             for marker, state in self.stages:
                 marker.set_text('✓')
                 state.set_text('Done')
+            if self.tutorial_ready:
+                self.close_button.set_label('Open tutorial')
         else:
             self.task.set_text('Installation stopped')
             self.detail.set_text((self.recent[-1] if self.recent else 'See the terminal for details')[:240])
             for line in self.recent:
                 print(line, file=sys.stderr)
         return False
+
+    def close(self, *_):
+        open_tutorial = self.finished and self.exit_code == 0 and self.tutorial_ready
+        self.destroy()
+        if open_tutorial:
+            subprocess.Popen([str(Path.home() / '.local/bin/rice-tutorial'), '--first-run'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
 
     def pulse(self):
         if self.finished:

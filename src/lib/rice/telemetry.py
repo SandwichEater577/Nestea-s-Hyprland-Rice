@@ -1,7 +1,7 @@
-"""Optional, anonymous active-machine check-in for update checks.
+"""Anonymous active-machine check-in for update checks.
 
 No raw machine ID or network address is written to rice state. A check-in only
-runs after the user enabled it and a public HTTPS endpoint has been configured.
+runs after installation and a public HTTPS endpoint has been configured.
 """
 import hashlib
 import json

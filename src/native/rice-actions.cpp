@@ -13,13 +13,14 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QSaveFile>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QVariant>
 #include <algorithm>
 #include <QRegularExpression>
 
 static QString home() { return QDir::homePath(); }
-static QString bin(const QString &name) { return home() + "/.local/bin/" + name; }
+static QString bin(const QString &name) { return QStandardPaths::findExecutable(name); }
 static QString state(const QString &name) { return home() + "/.local/state/rice/" + name; }
 static QString options(const QString &name) { return home() + "/.config/rice/" + name; }
 

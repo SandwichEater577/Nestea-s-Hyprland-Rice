@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""First-run rice tour. Every desktop control shown here is a static model."""
+import fcntl
+import math
+import cairo
+from pathlib import Path
+import sys
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+gi.require_version('GtkLayerShell', '0.1')
+from gi.repository import Gdk, Gtk, GtkLayerShell, Pango
+
+
+HOME = Path.home()
+STATE = HOME / '.local/state/rice'
+PENDING = STATE / 'tutorial-pending'
+PAGES = [
+    ('A desktop with room to focus',
+     'The bar stays small. Your windows remain the main event.',
+     'The preview below is a model. Its windows and controls do not run anything.'),
+    ('Five spaces, one clear view',
+     'Use workspaces to keep apps apart without hiding them.',
+     'Super + 1–5 switches spaces. Super + Shift + 1–5 moves a window.'),
+    ('Quick settings, exactly where you expect',
+     'The gear opens this compact menu beside the real bar.',
+     'This is a drawn copy of Quick settings. Its choices and slider cannot change your system.'),
+    ('Sound, with your devices in one place',
+     'The Sound page shows volume, outputs, microphones and playing apps.',
+     'This example uses the same rows and styling as the real Sound page. Its values are only examples.'),
+    ('Capture and find things quickly',
+     'The everyday shortcuts are already connected on your real desktop.',
+     'Print saves a screenshot. Super + Shift + S selects a region. Super + Shift + V opens clipboard history.'),
+    ('You are ready',
+     'Close this tour and use the real desktop.',
+     'Super + Space searches desktop actions. Open this tour again from Quick settings → Rice → Tutorial.'),
+]
+
+
+def label(text, style=None, wrap=False):
+    item = Gtk.Label(label=text, xalign=0)
+    if style:
+        item.get_style_context().add_class(style)
+    item.set_line_wrap(wrap)
+    return item
+
+
+def box(style=None, spacing=0):
+    item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=spacing)
+    if style:
+        item.get_style_context().add_class(style)
+    return item
+
+
+class Surface(Gtk.EventBox):
+    COLORS = {
+        'tutorial-root': ((25, 25, 25), (69, 69, 69), 14),
+        'demo-desktop': ((15, 15, 15), (64, 64, 64), 10),
+        'mock-window': ((35, 35, 35), (84, 84, 84), 10),
+        'quick-card': ((25, 27, 29), (58, 60, 62), 15),
+        'panel': ((25, 25, 25), (59, 59, 59), 16),
+        'bar-pill': ((22, 22, 22), (59, 59, 59), 10),
+    }
+
+    def __init__(self, content, style=None, name=None):
+        super().__init__()
+        self.set_visible_window(True)
+        self.surface_name = name
+        if style:
+            self.get_style_context().add_class(style)
+        if name:
+            self.set_name(name)
+        self.add(content)
+
+    def do_draw(self, cr):
+        Gtk.EventBox.do_draw(self, cr)
+        colors = self.COLORS.get(self.surface_name)
+        if colors:
+            cr.save()
+            cr.set_operator(cairo.OPERATOR_DEST_OVER)
+            fill, border, radius = colors
+            size = self.get_allocation()
+            w, h = size.width, size.height
+            r = min(radius, w / 2, h / 2)
+            cr.new_path()
+            cr.arc(w - r, r, r, -math.pi / 2, 0)
+            cr.arc(w - r, h - r, r, 0, math.pi / 2)
+            cr.arc(r, h - r, r, math.pi / 2, math.pi)
+            cr.arc(r, r, r, math.pi, 3 * math.pi / 2)
+            cr.close_path()
+            cr.set_source_rgb(*(x / 255 for x in fill))
+            cr.fill_preserve()
+            cr.set_source_rgb(*(x / 255 for x in border))
+            cr.set_line_width(1)
+            cr.stroke()
+            cr.restore()
+        return False
+
+
+def surface(content, style=None, name=None):
+    return Surface(content, style, name)
+
+
+# Mirror the inert branch of panels.py's shared Sound widget builders.
+def make_label(text, css=None):
+    item = Gtk.Label(label=str(text), xalign=0)
+    item.set_max_width_chars(28)
+    item.set_ellipsize(Pango.EllipsizeMode.END)
+    if css:
+        item.get_style_context().add_class(css)
+    return item
+
+
+def make_icon(name, size=20):
+    item = Gtk.Image.new_from_icon_name(name, Gtk.IconSize.BUTTON)
+    item.set_pixel_size(size)
+    return item
+
+
+def make_section(body, title):
+    body.pack_start(make_label(title, 'section'), False, False, 0)
+    group = box(spacing=2)
+    group.get_style_context().add_class('group')
+    body.pack_start(group, False, False, 0)
+    return group
+
+
+def make_row(parent, title, subtitle, icon, selected=False, tail=None):
+    row = Gtk.Box()
+    row.get_style_context().add_class('device-row')
+    if selected:
+        row.get_style_context().add_class('selected')
+    content = Gtk.Box(spacing=12)
+    content.pack_start(make_icon(icon), False, False, 0)
+    words = box(spacing=4)
+    words.pack_start(make_label(title, 'row-title'), False, False, 0)
+    if subtitle:
+        words.pack_start(make_label(subtitle, 'subtitle'), False, False, 0)
+    content.pack_start(words, True, True, 0)
+    if tail:
+        content.pack_end(tail, False, False, 0)
+    elif selected:
+        content.pack_end(make_icon('object-select-symbolic', 16), False, False, 0)
+    row.pack_start(content, True, True, 0)
+    parent.pack_start(row, False, False, 0)
+    return row
+
+
+def mock_window(title, lines, width=None):
+    frame = box(spacing=9)
+    if width:
+        frame.set_size_request(width, -1)
+    top = Gtk.Box(spacing=8)
+    top.get_style_context().add_class('mock-titlebar')
+    top.pack_start(label('●  ●  ●', 'mock-dots'), False, False, 0)
+    top.pack_start(label(title, 'mock-window-title'), True, True, 0)
+    frame.pack_start(top, False, False, 0)
+    for line in lines:
+        frame.pack_start(label(line, 'mock-line', True), False, False, 0)
+    return surface(frame, name='mock-window')
+
+
+def quick_choice(title, selected=False):
+    cell = Gtk.Box(spacing=7)
+    cell.get_style_context().add_class('quick-choice')
+    if selected:
+        cell.get_style_context().add_class('quick-choice-selected')
+    cell.set_size_request(164, 38)
+    cell.pack_start(label(title, 'quick-choice-text-selected' if selected else 'quick-choice-text'),
+                    True, True, 0)
+    return cell
+
+
+def draw_slider(widget, cr):
+    width = widget.get_allocated_width()
+    y = widget.get_allocated_height() / 2
+    cr.set_source_rgb(0.35, 0.36, 0.36)
+    cr.rectangle(0, y - 2, width, 4)
+    cr.fill()
+    cr.set_source_rgb(0.93, 0.93, 0.93)
+    cr.rectangle(0, y - 2, width * 0.68, 4)
+    cr.fill()
+    cr.arc(width * 0.68, y, 7.5, 0, 2 * math.pi)
+    cr.set_source_rgb(0.97, 0.97, 0.97)
+    cr.fill()
+    return False
+
+
+def mock_toggle(active):
+    canvas = Gtk.DrawingArea()
+    canvas.set_size_request(36, 20)
+    canvas.set_valign(Gtk.Align.CENTER)
+
+    def draw(widget, cr):
+        w, h = 36, 20
+        cr.set_source_rgb(*(0.94, 0.94, 0.94) if active else (0.26, 0.26, 0.26))
+        cr.arc(h / 2, h / 2, h / 2, math.pi / 2, 3 * math.pi / 2)
+        cr.arc(w - h / 2, h / 2, h / 2, -math.pi / 2, math.pi / 2)
+        cr.close_path()
+        cr.fill()
+        cr.set_source_rgb(*(0.11, 0.11, 0.11) if active else (0.78, 0.78, 0.78))
+        cr.arc(w - 10 if active else 10, h / 2, 8, 0, 2 * math.pi)
+        cr.fill()
+        return False
+
+    canvas.connect('draw', draw)
+    return canvas
+
+
+def quick_row(glyph, title, detail):
+    row = Gtk.Box(spacing=12)
+    row.get_style_context().add_class('quick-row')
+    row.set_size_request(-1, 48)
+    row.pack_start(label(glyph, 'quick-glyph'), False, False, 0)
+    content = box(spacing=2)
+    content.set_valign(Gtk.Align.CENTER)
+    content.pack_start(label(title, 'quick-row-title'), False, False, 0)
+    content.pack_start(label(detail, 'quick-row-detail'), False, False, 0)
+    row.pack_start(content, True, True, 0)
+    row.pack_end(label('›', 'quick-chevron'), False, False, 0)
+    return row
+
+
+def quick_source_row(glyph, title, detail, active):
+    row = Gtk.Box(spacing=12)
+    row.get_style_context().add_class('quick-row')
+    row.set_size_request(-1, 49)
+    row.pack_start(label(glyph, 'quick-glyph'), False, False, 0)
+    words = box(spacing=2)
+    words.set_valign(Gtk.Align.CENTER)
+    words.pack_start(label(title, 'quick-row-title'), False, False, 0)
+    words.pack_start(label(detail, 'quick-row-detail'), False, False, 0)
+    row.pack_start(words, True, True, 0)
+    row.pack_end(mock_toggle(active), False, False, 0)
+    return row
+
+
+def quick_settings_card():
+    card = box(spacing=8)
+    card.set_size_request(392, -1)
+    header = Gtk.Box()
+    header.pack_start(label('Quick settings', 'quick-heading'), True, True, 0)
+    header.pack_end(label('↻     ×', 'quick-chrome'), False, False, 0)
+    card.pack_start(header, False, False, 0)
+    card.pack_start(label('QUICK CONTROLS', 'quick-section'), False, False, 5)
+    for names in (('  Sound', '  Wi-Fi'), ('  Bluetooth', '  Media'), ('󰍹  Displays',)):
+        row = Gtk.Box(spacing=7)
+        for name in names:
+            row.pack_start(quick_choice(name), True, True, 0)
+        card.pack_start(row, False, False, 0)
+    card.pack_start(label('DISPLAY & POWER', 'quick-section'), False, False, 8)
+    bright = box('quick-brightness', 8)
+    head = Gtk.Box()
+    head.pack_start(label('☼  Brightness', 'quick-row-title'), True, True, 0)
+    head.pack_end(label('68%', 'quick-row-detail'), False, False, 0)
+    bright.pack_start(head, False, False, 0)
+    track = Gtk.DrawingArea()
+    track.set_size_request(-1, 34)
+    track.connect('draw', draw_slider)
+    bright.pack_start(track, False, False, 0)
+    card.pack_start(bright, False, False, 0)
+    card.pack_start(label('Power mode', 'quick-section'), False, False, 0)
+    modes = Gtk.Box(spacing=7)
+    for name in ('Saver', 'Balanced', 'Fast'):
+        modes.pack_start(quick_choice(name, name == 'Balanced'), True, True, 0)
+    card.pack_start(modes, False, False, 0)
+    card.pack_start(label('MEDIA SOURCES', 'quick-section'), False, False, 8)
+    card.pack_start(quick_source_row('♫', 'Spotify app', 'Show playback controls while open', True), False, False, 0)
+    card.pack_start(quick_source_row('◌', 'Browser players', 'Spotify Web, SoundCloud, YouTube Music', False), False, False, 0)
+    card.pack_start(label('RICE', 'quick-section'), False, False, 8)
+    card.pack_start(quick_row('', 'Update history', 'New, old and ignored updates'), False, False, 0)
+    card.pack_start(quick_row('?', 'Tutorial', 'Tour the desktop with safe mock windows'), False, False, 0)
+    return surface(card, name='quick-card')
+
+
+def sound_switch_row(parent, title, detail, icon, active=False):
+    switch = Gtk.Switch()
+    switch.set_active(active)
+    switch.set_sensitive(False)
+    switch.set_valign(Gtk.Align.CENTER)
+    make_row(parent, title, detail, icon, tail=switch)
+
+
+def sound_card():
+    card = box('sound-card', 12)
+    card.set_size_request(380, -1)
+    header = Gtk.Box(spacing=12)
+    header.pack_start(make_label('Sound', 'title'), True, True, 0)
+    header.pack_end(make_label('↻    ×', 'subtitle'), False, False, 0)
+    card.pack_start(header, False, False, 0)
+    body = box(spacing=12)
+    card.pack_start(body, False, False, 0)
+    group = box(spacing=2)
+    body.pack_start(group, False, False, 0)
+    volume = box('slider-block', 8)
+    head = Gtk.Box(spacing=8)
+    head.pack_start(make_icon('audio-volume-high-symbolic', 16), False, False, 0)
+    head.pack_start(make_label('Volume', 'row-title'), True, True, 0)
+    head.pack_end(make_label('68%', 'value'), False, False, 0)
+    volume.pack_start(head, False, False, 0)
+    scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+    scale.set_value(68)
+    scale.set_draw_value(False)
+    scale.set_sensitive(False)
+    volume.pack_start(scale, False, False, 0)
+    group.pack_start(volume, False, False, 0)
+    sound_switch_row(group, 'Mute', '', 'audio-volume-muted-symbolic')
+    sound_switch_row(group, 'Volume boost', 'Allow volume above 100%',
+                     'audio-volume-high-symbolic')
+    outputs = make_section(body, 'Output device')
+    make_row(outputs, 'Headphones', 'Connected · selected',
+             'audio-headphones-symbolic', selected=True)
+    make_row(outputs, 'Laptop speakers', 'Built-in audio',
+             'audio-speakers-symbolic')
+    inputs = make_section(body, 'Microphone')
+    sound_switch_row(inputs, 'Mute microphone', 'Discord and other apps cannot hear you while muted',
+                     'audio-input-microphone-symbolic')
+    make_row(inputs, 'Headset microphone', 'Connected · selected',
+             'audio-input-microphone-symbolic', selected=True)
+    card.pack_start(make_label('Esc to close', 'footer'), False, False, 0)
+    return surface(card, name='panel')
+
+
+class Tutorial(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Nestea's Rice · Tutorial")
+        self.index = 0
+        self.set_decorated(False)
+        self.set_app_paintable(True)
+        visual = self.get_screen().get_rgba_visual()
+        if visual:
+            self.set_visual(visual)
+        GtkLayerShell.init_for_window(self)
+        GtkLayerShell.set_namespace(self, 'rice-tutorial')
+        GtkLayerShell.set_layer(self, GtkLayerShell.Layer.OVERLAY)
+        GtkLayerShell.set_keyboard_mode(self, GtkLayerShell.KeyboardMode.EXCLUSIVE)
+        for edge in (GtkLayerShell.Edge.TOP, GtkLayerShell.Edge.BOTTOM,
+                     GtkLayerShell.Edge.LEFT, GtkLayerShell.Edge.RIGHT):
+            GtkLayerShell.set_anchor(self, edge, True)
+        GtkLayerShell.set_exclusive_zone(self, 0)
+        monitor = Gdk.Display.get_default().get_monitor(0)
+        geometry = monitor.get_geometry()
+        self.demo_height = max(280, min(530, geometry.height - 320))
+
+        backdrop = box('tutorial-backdrop')
+        self.add(backdrop)
+
+        outer = box(spacing=15)
+        outer.set_border_width(24)
+        card = surface(outer, name='tutorial-root')
+        card.set_size_request(min(920, geometry.width - 48),
+                              min(850, geometry.height - 48))
+        card.set_halign(Gtk.Align.CENTER)
+        card.set_valign(Gtk.Align.CENTER)
+        backdrop.pack_start(card, True, True, 0)
+        header = Gtk.Box(spacing=10)
+        header.pack_start(label('NESTEA / RICE', 'eyebrow'), True, True, 0)
+        self.count = label('', 'count')
+        header.pack_end(self.count, False, False, 0)
+        outer.pack_start(header, False, False, 0)
+        self.title = label('', 'tutorial-title')
+        outer.pack_start(self.title, False, False, 0)
+        self.subtitle = label('', 'tutorial-subtitle', True)
+        outer.pack_start(self.subtitle, False, False, 0)
+        self.preview = box()
+        outer.pack_start(surface(self.preview, name='demo-desktop'), True, True, 4)
+        self.hint = label('', 'tutorial-hint', True)
+        outer.pack_start(self.hint, False, False, 0)
+        footer = Gtk.Box(spacing=16)
+        footer.pack_start(label('MODEL ONLY  /  DESKTOP CONTROLS ARE INERT', 'eyebrow'), True, True, 0)
+        self.next = Gtk.Button(label='Next  →')
+        self.next.set_tooltip_text('Show the next part of the tour')
+        self.next.get_style_context().add_class('tutorial-next')
+        self.next.connect('clicked', self.advance)
+        footer.pack_end(self.next, False, False, 0)
+        outer.pack_end(footer, False, False, 0)
+        self.render()
+
+    def add_preview_card(self, stage, card, width):
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_size_request(width, self.demo_height)
+        scroller.add(card)
+        stage.pack_start(scroller, False, False, 0)
+
+    def render(self):
+        title, subtitle, hint = PAGES[self.index]
+        self.count.set_text(f'{self.index + 1:02d} / {len(PAGES):02d}')
+        self.title.set_text(title)
+        self.subtitle.set_text(subtitle)
+        self.hint.set_text(hint)
+        self.next.set_label('Finish tutorial' if self.index == len(PAGES) - 1 else 'Next  →')
+        self.next.set_tooltip_text('Finish the tour' if self.index == len(PAGES) - 1 else 'Show the next part of the tour')
+        for child in self.preview.get_children():
+            self.preview.remove(child)
+
+        bar = Gtk.Box(spacing=10)
+        bar.get_style_context().add_class('mock-bar')
+        bar.pack_start(surface(label('09:41      68%    ♫', 'mock-bar-text'), name='bar-pill'), False, False, 0)
+        bar.pack_start(Gtk.Box(), True, True, 0)
+        bar.pack_start(surface(label('1    2    3    4    5', 'mock-workspaces'), name='bar-pill'), False, False, 0)
+        bar.pack_start(Gtk.Box(), True, True, 0)
+        bar.pack_end(surface(label('Files    Wi-Fi    84%    ⚙', 'mock-bar-text'), name='bar-pill'), False, False, 0)
+        self.preview.pack_start(bar, False, False, 0)
+
+        stage = Gtk.Box(spacing=18)
+        stage.set_border_width(22)
+        stage.set_halign(Gtk.Align.CENTER)
+        stage.set_valign(Gtk.Align.CENTER)
+        self.preview.pack_start(stage, True, True, 0)
+        if self.index == 0:
+            stage.pack_start(mock_window('Kitty', ['$ fastfetch', 'Hyprland  ·  Lua  ·  QuickShell',
+                                                    'A quiet place to work.'], 340), True, True, 0)
+            stage.pack_start(mock_window('Files', ['Home', 'Documents', 'Pictures', 'Downloads'], 290),
+                             True, True, 0)
+        elif self.index == 1:
+            stage.pack_start(mock_window('Workspace 1 · Work', ['Kitty', 'VS Code', 'Files'], 300),
+                             True, True, 0)
+            stage.pack_start(mock_window('Workspace 2 · Music', ['Spotify', 'Your next space is ready.'], 300),
+                             True, True, 0)
+        elif self.index == 2:
+            self.add_preview_card(stage, quick_settings_card(), 392)
+        elif self.index == 3:
+            self.add_preview_card(stage, sound_card(), 380)
+        elif self.index == 4:
+            stage.pack_start(mock_window('Shortcuts', ['Print                 Full screenshot',
+                'Super + Shift + S     Select region',
+                'Super + Shift + V     Clipboard history',
+                'Super + R             Applications',
+                'Super + Space         Command palette'], 490), True, True, 0)
+        else:
+            stage.pack_start(mock_window('Your desktop', ['Super + R opens apps.',
+                'The gear opens Quick settings.',
+                'The tutorial is always available there.'], 450), True, True, 0)
+        self.preview.show_all()
+
+    def advance(self, *_):
+        if self.index + 1 < len(PAGES):
+            self.index += 1
+            self.render()
+            return
+        if PENDING.exists():
+            PENDING.unlink()
+        self.destroy()
+
+
+def main():
+    STATE.mkdir(parents=True, exist_ok=True)
+    lock = (STATE / 'tutorial.lock').open('w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return 0
+    if '--first-run' in sys.argv and not PENDING.exists():
+        return 0
+    Gtk.init([])
+    settings = Gtk.Settings.get_default()
+    settings.set_property('gtk-application-prefer-dark-theme', True)
+    css = Gtk.CssProvider()
+    css.load_from_path(str(Path(__file__).resolve().parents[1] / 'lib/rice/panels.css'))
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    css = Gtk.CssProvider()
+    css.load_from_path(str(Path(__file__).resolve().parents[1] / 'lib/rice/tutorial.css'))
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
+                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    window = Tutorial()
+    window.connect('destroy', Gtk.main_quit)
+    window.show_all()
+    window.present()
+    Gtk.main()
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

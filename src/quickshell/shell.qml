@@ -32,6 +32,12 @@ ShellRoot {
     property var visibleWorkspaces: [1, 2, 3, 4, 5]
     property var workspaceAttention: []
     property bool nativeReady: false
+    property bool managerReady: false
+    property int spotifyManageButtonSize: 24
+    property bool hasCode: false
+    property bool hasKitty: false
+    property bool hasThunar: false
+    property bool hasBtop: false
     property bool settingsOpen: false
     property var settingsScreen: Quickshell.screens[0]
     IpcHandler {
@@ -69,14 +75,28 @@ ShellRoot {
         Quickshell.execDetached(["touch", kickPath])   // watcher re-reads within ~100ms
     }
     function runNative(name, fallback) {
-        if (nativeReady) Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/" + name])
+        if (nativeReady) Quickshell.execDetached([name])
         else action(fallback)
     }
+    function runManaged(actionName, nativeName, fallback) {
+        if (managerReady) Quickshell.execDetached(["waybar-manager.exec", actionName])
+        else runNative(nativeName, fallback)
+    }
     Process {
-        command: ["test", "-x", Quickshell.env("HOME") + "/.local/bin/rice-actions"]
+        command: ["sh", "-c", "command -v rice-actions >/dev/null && command -v rice-show-settings >/dev/null && command -v rice-terminal >/dev/null"]
         running: true
         onExited: (code) => root.nativeReady = code === 0
     }
+    Process { command: ["sh", "-c", "command -v waybar-manager.exec >/dev/null"]; running: true
+        onExited: (code) => root.managerReady = code === 0 }
+    Process { command: ["sh", "-c", "command -v code >/dev/null"]; running: true
+        onExited: (code) => root.hasCode = code === 0 }
+    Process { command: ["sh", "-c", "command -v kitty >/dev/null"]; running: true
+        onExited: (code) => root.hasKitty = code === 0 }
+    Process { command: ["sh", "-c", "command -v thunar >/dev/null"]; running: true
+        onExited: (code) => root.hasThunar = code === 0 }
+    Process { command: ["sh", "-c", "command -v btop >/dev/null"]; running: true
+        onExited: (code) => root.hasBtop = code === 0 }
 
     FileView {
         id: colors
@@ -104,9 +124,21 @@ ShellRoot {
             try { root.timeFormat = JSON.parse(text()).time_format === "12h" ? "12h" : "24h" } catch (e) {}
         }
     }
+    FileView {
+        path: Quickshell.env("HOME") + "/.config/rice/bar-controls.json"
+        watchChanges: true
+        blockLoading: true
+        onFileChanged: reload()
+        onTextChanged: {
+            try {
+                var size = Number(JSON.parse(text()).spotify_manage_button_size)
+                if (size >= 16 && size <= 26) root.spotifyManageButtonSize = size
+            } catch (e) {}
+        }
+    }
     Process {
         id: statusStream
-        command: ["sh", "-c", "if [ -x \"$HOME/.local/bin/rice-status\" ]; then exec \"$HOME/.local/bin/rice-status\" --watch; else exec \"$HOME/.local/bin/bar-status\" --watch; fi"]
+        command: ["sh", "-c", "if command -v rice-status >/dev/null; then exec rice-status --watch; else exec bar-status --watch; fi"]
         running: true
         stdout: SplitParser {
             onRead: data => root.applyState(data)
@@ -119,7 +151,7 @@ ShellRoot {
     Timer { id: statusRestart; interval: 1000; onTriggered: statusStream.running = true }
     Process {
         id: workspaceStream
-        command: [Quickshell.env("HOME") + "/.local/bin/rice-workspace", "--stream"]
+        command: ["rice-workspace", "--stream"]
         running: true
         stdout: SplitParser {
             onRead: data => {
@@ -173,19 +205,25 @@ ShellRoot {
                         text: clockBtn.label.replace(/[0-9]/g, "8")
                     }
                     BarButton {
-                        label: root.audio; hint: root.audio_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette
-                        onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-audio" : button === Qt.MiddleButton ? "rice-audio-boost" : "rice-audio-mute", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio"] : [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", button === Qt.MiddleButton ? "boost" : "mute"])
-                        onWheeled: delta => root.runNative(delta > 0 ? "rice-audio-up" : "rice-audio-down", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "audio", delta > 0 ? "up" : "down"])
+                        label: root.audio; hint: (root.audio_tooltip || "Audio") + " · left: mute · middle: boost · right: outputs · wheel: volume"; clickInfo: "Audio control sent"; wheelInfo: "Changing volume"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette
+                        onClicked: button => root.runManaged(button === Qt.RightButton ? "audio-open-button" : button === Qt.MiddleButton ? "audio-boost-button" : "audio-mute-button", button === Qt.RightButton ? "rice-show-audio" : button === Qt.MiddleButton ? "rice-audio-boost" : "rice-audio-mute", button === Qt.RightButton ? ["desktop-menu", "audio"] : ["desktop-menu", "audio", button === Qt.MiddleButton ? "boost" : "mute"])
+                        onWheeled: delta => root.runManaged(delta > 0 ? "audio-volume-up" : "audio-volume-down", delta > 0 ? "rice-audio-up" : "rice-audio-down", ["desktop-menu", "audio", delta > 0 ? "up" : "down"])
                     }
                     Item {
                         id: albumCover
                         visible: root.spotify_running && root.cover !== ""
                         width: 24; height: 24
                         Image { anchors.fill: parent; source: root.cover !== "" ? (root.cover.indexOf("://") !== -1 ? root.cover : "file://" + root.cover) : ""; asynchronous: true; fillMode: Image.PreserveAspectFit; sourceSize.width: 24; sourceSize.height: 24 }
+                        Rectangle { anchors.fill: parent; color: "#ffffff"; opacity: albumPointer.pressed ? 0.25 : 0 }
                         MouseArea {
                             id: albumPointer
                             anchors.fill: parent; hoverEnabled: true
-                            onClicked: root.runNative("rice-show-media", [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"])
+                            onClicked: {
+                                albumCover.albumActionInfo = "Opening Media"
+                                albumCover.albumTipShown = true
+                                albumActionDelay.restart()
+                                root.runManaged("spotify-open-button", "rice-show-media", ["desktop-panel", "media"])
+                            }
                             onContainsMouseChanged: {
                                 if (containsMouse)
                                     albumDelay.restart()
@@ -196,6 +234,8 @@ ShellRoot {
                             }
                         }
                         property bool albumTipShown: false
+                        property string albumActionInfo: ""
+                        Timer { id: albumActionDelay; interval: 1300; onTriggered: albumCover.albumActionInfo = "" }
                         Timer {
                             id: albumDelay
                             interval: 300
@@ -205,16 +245,16 @@ ShellRoot {
                         PopupWindow {
                             id: albumTip
                             anchor.item: albumCover
-                            anchor.rect.x: (albumCover.width - width) / 2
+                            anchor.rect.x: 0
                             anchor.rect.y: albumCover.height + 7
                             implicitWidth: albumTipRect.implicitWidth
                             implicitHeight: albumTipRect.implicitHeight
                             color: "transparent"
-                            visible: albumCover.albumTipShown && root.track !== ""
+                            visible: albumCover.albumTipShown
                             Rectangle {
                                 id: albumTipRect
                                 anchors.fill: parent
-                                implicitWidth: albumTipText.implicitWidth + 16
+                                implicitWidth: Math.min(albumTipMeasure.implicitWidth + 16, 356)
                                 implicitHeight: albumTipText.implicitHeight + 12
                                 color: root.palette.background
                                 Behavior on color { ColorAnimation { duration: 200 } }
@@ -222,22 +262,31 @@ ShellRoot {
                                 border.color: root.palette.border
                                 radius: 6
                                 Text {
+                                    id: albumTipMeasure
+                                    visible: false
+                                    text: albumCover.albumActionInfo || (root.track ? root.track + " · click to open Media" : "Open Media")
+                                    font.family: "Adwaita Sans"
+                                    font.pixelSize: 12
+                                }
+                                Text {
                                     id: albumTipText
                                     anchors.centerIn: parent
-                                    text: root.track
+                                    width: parent.width - 16
+                                    text: albumCover.albumActionInfo || (root.track ? root.track + " · click to open Media" : "Open Media")
                                     color: root.palette.foreground
                                     font.family: "Adwaita Sans"
                                     font.pixelSize: 12
+                                    wrapMode: Text.WordWrap
                                     textFormat: Text.PlainText
                                 }
                             }
                         }
                     }
-                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: root.shuffle_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-media" : "rice-media-shuffle", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "shuffle"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒮"; hint: "Previous track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-previous", [Quickshell.env("HOME") + "/.local/bin/rice-media", "previous"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: root.spotify; hint: "Play / pause"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.RightButton ? "rice-show-media" : "rice-media-toggle", button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "media"] : [Quickshell.env("HOME") + "/.local/bin/rice-media", "toggle"]); onWheeled: delta => root.runNative(delta > 0 ? "rice-media-up" : "rice-media-down", [Quickshell.env("HOME") + "/.local/bin/rice-media", delta > 0 ? "up" : "down"]) }
-                    BarButton { visible: root.spotify_running; glyphSize: 24; label: "󰒭"; hint: "Next track"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-next", [Quickshell.env("HOME") + "/.local/bin/rice-media", "next"]) }
-                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: root.repeat_tooltip || ""; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-media-repeat", [Quickshell.env("HOME") + "/.local/bin/rice-media", "repeat"]) }
+                    BarButton { visible: root.spotify_running && root.shuffle !== ""; glyphSize: 16; label: root.shuffle; hint: (root.shuffle_tooltip || "Shuffle") + " · click: toggle · right: Media"; clickInfo: "Shuffle action sent"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runManaged(button === Qt.RightButton ? "spotify-open-button" : "spotify-shuffle-button", button === Qt.RightButton ? "rice-show-media" : "rice-media-shuffle", button === Qt.RightButton ? ["desktop-panel", "media"] : ["rice-media", "shuffle"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: root.spotifyManageButtonSize; label: "󰒮"; hint: "Play previous track"; clickInfo: "Previous track requested"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("spotify-previous-button", "rice-media-previous", ["rice-media", "previous"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: root.spotifyManageButtonSize; label: root.spotify; hint: "Click: play or pause · right: Media · wheel: volume"; clickInfo: "Playback action sent"; wheelInfo: "Changing media volume"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runManaged(button === Qt.RightButton ? "spotify-open-button" : "spotify-play-button", button === Qt.RightButton ? "rice-show-media" : "rice-media-toggle", button === Qt.RightButton ? ["desktop-panel", "media"] : ["rice-media", "toggle"]); onWheeled: delta => root.runManaged(delta > 0 ? "spotify-volume-up" : "spotify-volume-down", delta > 0 ? "rice-media-up" : "rice-media-down", ["rice-media", delta > 0 ? "up" : "down"]) }
+                    BarButton { visible: root.spotify_running; glyphSize: root.spotifyManageButtonSize; label: "󰒭"; hint: "Play next track"; clickInfo: "Next track requested"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("spotify-next-button", "rice-media-next", ["rice-media", "next"]) }
+                    BarButton { visible: root.spotify_running && root.repeat !== ""; glyphSize: 16; label: root.repeat; hint: (root.repeat_tooltip || "Repeat") + " · click: cycle mode"; clickInfo: "Repeat mode change requested"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("spotify-repeat-button", "rice-media-repeat", ["rice-media", "repeat"]) }
                 }
             }
             Rectangle {
@@ -259,6 +308,8 @@ ShellRoot {
                         BarButton {
                             required property int modelData
                             label: String(modelData)
+                            hint: "Switch to workspace " + modelData
+                            clickInfo: "Switching to workspace " + modelData
                             minimumWidth: 39
                             implicitHeight: 22
                             radius: 5
@@ -269,8 +320,10 @@ ShellRoot {
                             hoverColor: root.palette.hover; pal: root.palette
                             // The native handler uses Hyprland's Lua dispatcher.
                             onClicked: {
-                                if (root.nativeReady)
-                                    Quickshell.execDetached([Quickshell.env("HOME") + "/.local/bin/rice-workspace-focus", String(modelData)])
+                                if (root.managerReady)
+                                    Quickshell.execDetached(["waybar-manager.exec", "workspace-focus-button", String(modelData)])
+                                else if (root.nativeReady)
+                                    Quickshell.execDetached(["rice-workspace-focus", String(modelData)])
                                 else Hyprland.dispatch("hl.dsp.focus({workspace=" + modelData + "})")
                             }
                         }
@@ -290,26 +343,31 @@ ShellRoot {
                 border.color: root.palette.border
                 Row {
                     id: rightRow
+                    objectName: "riceRightRow"
                     anchors.centerIn: parent
-                    BarButton { label: "󰨞"; hint: "VS Code · middle click: folder · right click: focus"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runNative(button === Qt.MiddleButton ? "rice-vscode-folder" : button === Qt.RightButton ? "rice-vscode-focus" : "rice-vscode-menu", button === Qt.MiddleButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "folder"] : button === Qt.RightButton ? [Quickshell.env("HOME") + "/.local/bin/vscode-menu", "focus"] : [Quickshell.env("HOME") + "/.local/bin/vscode-menu"]) }
-                    BarButton { label: ""; hint: "Terminal"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-terminal", ["kitty"]) }
-                    BarButton { label: ""; hint: "Files"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-files", ["thunar"]) }
-                    BarButton { visible: root.display !== ""; label: root.display; hint: root.display_tooltip || "Displays"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-display", [Quickshell.env("HOME") + "/.local/bin/desktop-panel", "display"]) }
-                    BarButton { visible: root.bluetooth !== ""; label: root.bluetooth; hint: "Bluetooth devices"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-bluetooth", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "bluetooth"]) }
-                    BarButton { label: root.network; hint: root.network_tooltip || "Networks"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runNative("rice-show-network", [Quickshell.env("HOME") + "/.local/bin/desktop-menu", "network"]) }
-                    BarButton { visible: root.battery !== ""; interactive: false; label: root.battery_icon + "  " + root.battery; hint: root.battery_tooltip; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
-                    BarButton { id: settingsButton; label: ""; hint: "Quick settings"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: {
+                    BarButton { visible: root.hasCode; label: "󰨞"; hint: "VS Code · click: projects · middle: folder · right: focus"; clickInfo: "VS Code action requested"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: button => root.runManaged(button === Qt.MiddleButton ? "vscode-folder-button" : button === Qt.RightButton ? "vscode-focus-button" : "vscode-project-button", button === Qt.MiddleButton ? "rice-vscode-folder" : button === Qt.RightButton ? "rice-vscode-focus" : "rice-vscode-menu", button === Qt.MiddleButton ? ["vscode-menu", "folder"] : button === Qt.RightButton ? ["vscode-menu", "focus"] : ["vscode-menu"]) }
+                    BarButton { visible: root.hasKitty; label: ""; hint: "Open terminal"; clickInfo: "Opening terminal"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("terminal-open-button", "rice-terminal", ["kitty"]) }
+                    BarButton { visible: root.hasThunar; label: ""; hint: "Open files"; clickInfo: "Opening files"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("files-open-button", "rice-files", ["thunar"]) }
+                    BarButton { visible: root.display !== ""; label: root.display; hint: (root.display_tooltip || "Displays") + " · click: display controls"; clickInfo: "Opening display controls"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("display-open-button", "rice-show-display", ["desktop-panel", "display"]) }
+                    BarButton { visible: root.bluetooth !== ""; label: root.bluetooth; hint: "Open Bluetooth devices"; clickInfo: "Opening Bluetooth controls"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("bluetooth-open-button", "rice-show-bluetooth", ["desktop-menu", "bluetooth"]) }
+                    BarButton { label: root.network; hint: (root.network_tooltip || "Networks") + " · click: network controls"; clickInfo: "Opening network controls"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.runManaged("network-open-button", "rice-show-network", ["desktop-menu", "network"]) }
+                    BarButton { visible: root.battery !== ""; interactive: false; label: root.battery_icon + "  " + root.battery; hint: root.battery_tooltip || "Battery status"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette }
+                    BarButton { id: settingsButton; label: ""; hint: "Open Quick settings"; clickInfo: "Quick settings toggled"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: {
                         root.settingsScreen = panel.screen
-                        if (root.nativeReady) root.runNative("rice-show-settings", [])
-                        else root.settingsOpen = !root.settingsOpen
+                        root.settingsOpen = !root.settingsOpen
                     } }
-                    BarButton { label: ""; hint: "Power / session · triple click: shut down"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.action([Quickshell.env("HOME") + "/.local/bin/power-click"]) }
+                    BarButton { label: ""; hint: "Session menu · triple click: shut down"; clickInfo: "Power action requested"; ink: root.palette.foreground; hoverColor: root.palette.hover; pal: root.palette; onClicked: root.managerReady ? Quickshell.execDetached(["waybar-manager.exec", "power-open-button"]) : root.action(["power-click"]) }
                 }
             }
             SettingsPanel {
                 trigger: settingsButton
                 shown: root.settingsOpen && root.settingsScreen === panel.screen
                 nativeReady: root.nativeReady
+                managerReady: root.managerReady
+                hasCode: root.hasCode
+                hasKitty: root.hasKitty
+                hasBtop: root.hasBtop
+                hasBattery: root.battery !== ""
                 onCloseRequested: root.settingsOpen = false
             }
         }

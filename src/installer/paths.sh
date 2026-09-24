@@ -20,11 +20,13 @@ rice_managed_paths() {
         .local/share/rice/source \
         .config/rice/WiFi-Options.json .config/rice/Bluetooth-Options.json \
         .config/rice/Media-Options.json .config/rice/settings.json \
+        .config/rice/bar-controls.json \
         .config/rice/telemetry.json \
         .config/rice/display-device.tsv .config/rice/display-layout.tsv \
         .config/rice/private.json.enc .config/rice/monitors.conf \
         .config/hypr/hyprland.lua .config/hypr/hyprland.conf \
-        .local/state/rice/installed-revision .local/state/rice/palette.json
+        .local/state/rice/installed-revision .local/state/rice/palette.json \
+        .local/state/rice/tutorial-pending
     for name in rice-bar rice-controls rice-hotspot rice-update-watch rice-update; do
         printf '.config/systemd/user/%s.service\n' "$name"
     done
@@ -38,6 +40,8 @@ rice_managed_paths() {
         find "$repo/src/bin" -maxdepth 1 -type f -printf '%f\n' | sort)
     while IFS= read -r name; do printf '.local/lib/rice/%s\n' "$name"; done < <(
         find "$repo/src/lib/rice" -maxdepth 1 -type f -printf '%f\n' | sort)
+    while IFS= read -r name; do printf '.local/lib/rice/actions/%s\n' "$name"; done < <(
+        find "$repo/src/actions" -maxdepth 1 -type f -name '*.exec' -printf '%f\n' | sort)
     while IFS= read -r target; do printf '.config/%s\n' "$target"; done < <(
         sed -n 's/.*\["target"\] = "\([^"]*\)".*/\1/p' "$repo/src/config/manifest.lua")
 }

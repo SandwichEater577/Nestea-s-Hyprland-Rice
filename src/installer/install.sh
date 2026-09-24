@@ -7,6 +7,13 @@ source "$repo/src/installer/monitors.sh"
 source "$repo/src/installer/paths.sh"
 source "$repo/src/installer/state.sh"
 if [[ $dry == --monitors ]]; then rice_monitors_generate; exit 0; fi
+first_install=false
+if [[ ! -f $HOME/.local/state/rice/installed-revision ]] && {
+    [[ ! -f $HOME/.local/state/rice/pre-install/manifest ]] ||
+    grep -Eq '^absent[[:space:]]+\.local/share/rice/source$' "$HOME/.local/state/rice/pre-install/manifest"
+}; then
+    first_install=true
+fi
 
 step() {
     if [[ ${RICE_UPDATE_PROGRESS:-} == 1 ]]; then
@@ -48,6 +55,8 @@ if [[ $dry != --dry-run ]]; then
         /usr/lib/qt6/bin/qmlformat "$repo/src/quickshell/SettingsPanel.qml" >/dev/null
     fi
     rice_backup_originals
+    mapfile -t managed_paths < <(rice_managed_paths | sort -u)
+    rice_backup_added_paths "${managed_paths[@]}"
 fi
 
 step 1 'Source and private settings'
@@ -78,14 +87,8 @@ if [[ $dry != --dry-run ]]; then
     if [[ -n ${RICE_BROWSER_MEDIA:-} ]]; then
         "$repo/src/bin/rice-media" set browser_media "$([[ $RICE_BROWSER_MEDIA == yes ]] && printf on || printf off)"
     fi
-    if [[ -n ${RICE_TELEMETRY:-} ]]; then
-        if [[ $RICE_TELEMETRY == yes ]]; then
-            printf '{"enabled": true}\n' > "$HOME/.config/rice/telemetry.json"
-        else
-            printf '{"enabled": false}\n' > "$HOME/.config/rice/telemetry.json"
-        fi
-        chmod 600 "$HOME/.config/rice/telemetry.json"
-    fi
+    printf '{"enabled": true}\n' > "$HOME/.config/rice/telemetry.json"
+    chmod 600 "$HOME/.config/rice/telemetry.json"
     for file in private.json.enc display-layout.tsv; do
         if [[ -f $repo/data/$file && ! -e $HOME/.config/rice/$file ]]; then
             install -m 600 "$repo/data/$file" "$HOME/.config/rice/$file"
@@ -113,6 +116,8 @@ if [[ $dry != --dry-run ]]; then
              "$HOME/.config/cava" "$HOME/.config/rofi"
     find "$repo/src/bin" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/bin" {} +
     find "$repo/src/lib/rice" -maxdepth 1 -type f -exec cp -a -t "$HOME/.local/lib/rice" {} +
+    mkdir -p "$HOME/.local/lib/rice/actions"
+    find "$repo/src/actions" -maxdepth 1 -type f -name '*.exec' -exec cp -a -t "$HOME/.local/lib/rice/actions" {} +
     for name in rice-actions rice-status; do
         cp -- "$build_dir/$name" "$HOME/.local/bin/$name.new"
         chmod 755 "$HOME/.local/bin/$name.new"
@@ -183,5 +188,13 @@ if [[ $dry != --dry-run ]]; then
         printf '%s\n' "$revision" > "$HOME/.local/state/rice/installed-revision.tmp"
         mv "$HOME/.local/state/rice/installed-revision.tmp" "$HOME/.local/state/rice/installed-revision"
     fi
+    if [[ $first_install == true ]]; then
+        : > "$HOME/.local/state/rice/tutorial-pending"
+        printf 'RICE_TUTORIAL_READY=1\n'
+    fi
 fi
 step 5 'Done · Hyprland Lua and QuickShell bar ready'
+if [[ $dry != --dry-run && $first_install == true && -n ${WAYLAND_DISPLAY:-} &&
+      ${RICE_UPDATE_PROGRESS:-0} != 1 ]]; then
+    "$HOME/.local/bin/rice-tutorial" --first-run >/dev/null 2>&1 &
+fi

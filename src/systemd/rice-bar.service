@@ -6,7 +6,8 @@ StartLimitBurst=8
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/quickshell --path %h/.local/share/rice/source/src/quickshell/shell.qml
+Environment="PATH=%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=quickshell --path %h/.local/share/rice/source/src/quickshell/shell.qml
 Restart=always
 RestartSec=1
 

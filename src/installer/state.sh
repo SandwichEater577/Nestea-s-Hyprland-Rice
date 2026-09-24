@@ -36,6 +36,24 @@ rice_backup_originals() {
     mv -- "$staging" "$backup"
 }
 
+# Updates can introduce new managed files after the first-install snapshot.
+rice_backup_added_paths() {
+    local backup="$HOME/.local/state/rice/pre-install" relative source
+    [[ -f $backup/manifest ]] || return 1
+    for relative in "$@"; do
+        [[ $relative != /* && $relative != *'..'* ]] || return 1
+        if cut -f2- "$backup/manifest" | grep -Fxq -- "$relative"; then continue; fi
+        source="$HOME/$relative"
+        if [[ -e $source || -L $source ]]; then
+            mkdir -p "$backup/files/$(dirname "$relative")"
+            cp -a -- "$source" "$backup/files/$relative"
+            printf 'present\t%s\n' "$relative" >> "$backup/manifest"
+        else
+            printf 'absent\t%s\n' "$relative" >> "$backup/manifest"
+        fi
+    done
+}
+
 rice_restore_originals() {
     local backup="$HOME/.local/state/rice/pre-install" kind relative target
     [[ -f $backup/manifest ]] || {

@@ -69,6 +69,14 @@ def bluetooth_data():
     return dict(available=bool(controller),enabled='Powered: yes' in controller,devices=devices)
 
 
+def has_battery():
+    supply=Path('/sys/class/power_supply')
+    try:
+        return any((device/'type').read_text().strip()=='Battery' for device in supply.iterdir())
+    except OSError:
+        return False
+
+
 def settings_data():
     native=Path.home()/'.local/bin'
     profile_command=native/'rice-profile-current'
@@ -79,13 +87,14 @@ def settings_data():
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
         brightness_task=pool.submit(backend.run,str(brightness_command) if brightness_command.exists() else 'brightnessctl',
                                     *([] if brightness_command.exists() else ['-m']))
+        battery=has_battery()
         profile_task=pool.submit(backend.run,str(profile_command) if profile_command.exists() else 'tlpctl',
-                                 *([] if profile_command.exists() else ['get']))
+                                 *([] if profile_command.exists() else ['get'])) if battery else None
         displays_task=pool.submit(available_displays)
         value=brightness_task.result()
         if not brightness_command.exists():value=value.split(',')[3].rstrip('%') if len(value.split(','))>3 else ''
         brightness=int(value) if value.isdigit() else None
-        return dict(brightness=brightness,profile=profile_task.result(),displays=displays_task.result(),
+        return dict(brightness=brightness,battery=battery,profile=profile_task.result() if profile_task else '',displays=displays_task.result(),
                     time_format=backend.run(str(native/'rice-clock'),'get') or '24h',media=mpris.options(),
                     update=update_check.status())
 
@@ -158,6 +167,7 @@ def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_ti
     elif fn:box.pack_end(make_icon('go-next-symbolic',14),False,False,0)
     if fn:
         row.add(box)
+        row.set_tooltip_text(title + (f' · {subtitle}' if subtitle else ''))
         row.connect('clicked',lambda *_:fn())
     else:row.pack_start(box,True,True,0)
     parent.pack_start(row,False,False,0)
@@ -166,6 +176,7 @@ def make_row(parent,title,subtitle,icon,fn=None,selected=False,tail=None,wrap_ti
 
 def make_action_button(parent,title,fn,primary=False):
     button=Gtk.Button(label=title)
+    button.set_tooltip_text(title)
     button.get_style_context().add_class('primary' if primary else 'secondary')
     button.connect('clicked',lambda *_:fn())
     parent.pack_start(button,False,False,0)
@@ -293,6 +304,7 @@ class Panel(Gtk.ApplicationWindow):
 
     def switch_row(self,parent,title,subtitle,active,fn,icon):
         switch=Gtk.Switch()
+        switch.set_tooltip_text(title + (f' · {subtitle}' if subtitle else ''))
         switch.set_valign(Gtk.Align.CENTER)
         switch.set_active(active)
         switch.connect('state-set',lambda _,state:self.switch_action(fn,state))
@@ -314,6 +326,7 @@ class Panel(Gtk.ApplicationWindow):
         head.pack_end(number,False,False,0)
         box.pack_start(head,False,False,0)
         scale=Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL,0 if title!='Brightness' else 2,maximum,1)
+        scale.set_tooltip_text(f'Adjust {title.lower()}')
         scale.set_value(value)
         scale.set_draw_value(False)
         scale.set_hexpand(True)
@@ -565,7 +578,7 @@ class Panel(Gtk.ApplicationWindow):
             group.pack_start(holder,False,False,0)
             content=Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             holder.pack_start(content,True,True,0)
-            self.row(content,'Download update',detail,'software-update-available-symbolic',
+            self.row(content,'View update',detail,'software-update-available-symbolic',
                      lambda s=sha:self.app.open_updates(s))
             if entry.get('kind')!='mandatory':
                 ignore=Gtk.Button(label='Ignore')
@@ -586,24 +599,29 @@ class Panel(Gtk.ApplicationWindow):
         if data['brightness'] is not None:
             group=self.section('Brightness')
             self.slider(group,'Brightness',data['brightness'],100,lambda v:backend.run('brightnessctl','set',f'{v}%',check=True),'display-brightness-symbolic')
-        power=self.section('Power mode')
-        choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);power.pack_start(choices,False,False,0)
-        profile_buttons={}
-        def choose_profile(profile):
-            command={'power-saver':'rice-profile-saver','balanced':'rice-profile-balanced',
-                     'performance':'rice-profile-fast'}[profile]
-            native=Path.home()/'.local/bin'/command
-            action=(lambda:backend.run(str(native),check=True)) if native.exists() else (
-                lambda:backend.run('tlpctl','set',profile,check=True))
-            def selected(_):
-                for value,button in profile_buttons.items():
-                    style=button.get_style_context()
-                    style.remove_class('primary' if value!=profile else 'secondary')
-                    style.add_class('primary' if value==profile else 'secondary')
-            self.work(action,done=selected,refresh=False,busy=False)
-        for label,profile in [('Saver','power-saver'),('Balanced','balanced'),('Fast','performance')]:
-            profile_buttons[profile]=self.action_button(choices,label,lambda p=profile:choose_profile(p),
-                                                        primary=data['profile']==profile)
+        if data['battery']:
+            power=self.section('Power mode')
+            choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);power.pack_start(choices,False,False,0)
+            profile_buttons={}
+            def choose_profile(profile):
+                command={'power-saver':'rice-profile-saver','balanced':'rice-profile-balanced',
+                         'performance':'rice-profile-fast'}[profile]
+                native=Path.home()/'.local/bin'/command
+                manager=Path.home()/'.local/bin/waybar-manager.exec'
+                button={'power-saver':'power-saver-button','balanced':'power-balanced-button',
+                        'performance':'power-fast-button'}[profile]
+                action=(lambda:backend.run(str(manager),button,check=True)) if manager.exists() else (
+                    (lambda:backend.run(str(native),check=True)) if native.exists() else
+                    (lambda:backend.run('tlpctl','set',profile,check=True)))
+                def selected(_):
+                    for value,button in profile_buttons.items():
+                        style=button.get_style_context()
+                        style.remove_class('primary' if value!=profile else 'secondary')
+                        style.add_class('primary' if value==profile else 'secondary')
+                self.work(action,done=selected,refresh=False,busy=False)
+            for label,profile in [('Saver','power-saver'),('Balanced','balanced'),('Fast','performance')]:
+                profile_buttons[profile]=self.action_button(choices,label,lambda p=profile:choose_profile(p),
+                                                            primary=data['profile']==profile)
         group=self.section('Clock')
         choices=Gtk.Box(spacing=5);choices.set_homogeneous(True);group.pack_start(choices,False,False,0)
         clock_buttons={}
@@ -630,14 +648,14 @@ class Panel(Gtk.ApplicationWindow):
         group=self.section('Rice')
         if not waiting:
             if update.get('available'):
-                self.row(group,'Download update','New commits ready','software-update-available-symbolic',
-                         lambda:self.app.open_updates(update.get('sha','')))
+                self.row(group,'Check for updates','New release detected · load its details',
+                         'view-refresh-symbolic',lambda:self.work(lambda:update_check.check()))
             elif update.get('error'):
-                self.row(group,'Update check failed',update['error'],'dialog-information-symbolic',
+                self.row(group,'Retry update check',update['error'],'dialog-information-symbolic',
                          lambda:self.work(lambda:update_check.check()))
             else:
                 checked=update_check.ago(update.get('checked'))
-                self.row(group,'Rice is up to date',
+                self.row(group,'Check for updates',
                          f'Last checked {checked} · check again' if checked else 'Check now · checked every 30 minutes',
                          'view-refresh-symbolic',lambda:self.work(lambda:update_check.check()))
         self.row(group,'Update history','Every update · new, old and ignored','document-open-recent-symbolic',
@@ -834,7 +852,7 @@ class UpdatesOverlay(Gtk.Window):
         for sha,entry in entries:
             tag='('+entry.get('kind','recommended')+')'
             if entry.get('applied'):status='applied '+update_check.ago(entry['applied'])
-            elif entry.get('new'):status='new · waiting under Download update'
+            elif entry.get('new'):status='new · ready to install'
             else:status='ignored · still downloadable'
             name=update_check.display_name(entry)
             make_row(self.body,name,f'{tag} · {status}',
@@ -865,17 +883,17 @@ class UpdatesOverlay(Gtk.Window):
         actions=Gtk.Box(spacing=10)
         actions.set_homogeneous(True)
         self.body.pack_start(actions,False,False,0)
-        if not entry.get('applied'):
-            make_action_button(actions,'Install',self.download,primary=True)
+        if sha and entry and not entry.get('applied'):
+            make_action_button(actions,'Install this update',lambda:self.download(sha),primary=True)
         make_action_button(actions,'Cancel' if not entry.get('applied') else 'Close',self.destroy)
         self.body.show_all()
         self.footer.set_text('Esc to close')
 
-    def download(self):
+    def download(self,sha):
         # This separate GTK process survives the installer's restart of
         # rice-controls and keeps the progress window on screen until done.
         try:
-            process=subprocess.Popen([str(Path.home()/'.local/bin/rice-update-progress')],
+            process=subprocess.Popen([str(Path.home()/'.local/bin/rice-update-progress'),sha],
                                      start_new_session=True,stdout=subprocess.DEVNULL,
                                      stderr=subprocess.DEVNULL)
         except Exception as exc:

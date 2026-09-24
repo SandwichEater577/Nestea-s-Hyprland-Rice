@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Route a named bar action to its own executable. Behavior belongs to that file.
+set -euo pipefail
+if (( $# < 1 )) || [[ ! $1 =~ ^[a-z0-9-]+$ ]]; then
+    printf 'usage: waybar-manager.exec ACTION [ARGS...]\n' >&2
+    exit 2
+fi
+action=$1
+shift
+target="$HOME/.local/lib/rice/actions/$action.exec"
+if [[ ! -x $target ]]; then
+    printf 'Unknown bar action: %s\n' "$action" >&2
+    exit 2
+fi
+exec "$target" "$@"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Set this as the Counter-Strike 2 Steam launch option: rice-cs2 %command%
+set -euo pipefail
+
+if (($# == 0)); then
+    printf 'Set Counter-Strike 2 Steam Launch Options to: rice-cs2 %%command%%\n' >&2
+    exit 2
+fi
+if ! command -v gamemoderun >/dev/null 2>&1; then
+    printf 'rice-cs2: install the Arch gamemode package first.\n' >&2
+    exit 127
+fi
+
+exec gamemoderun "$@"

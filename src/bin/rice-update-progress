@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import re
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -29,7 +30,7 @@ def label(value, style=None):
 
 
 class ProgressWindow(Gtk.Window):
-    def __init__(self):
+    def __init__(self, sha):
         super().__init__(title='Rice update progress')
         self.set_name('rice-overlay')
         self.set_decorated(False)
@@ -53,9 +54,8 @@ class ProgressWindow(Gtk.Window):
         card.add(body)
         body.pack_start(label('Installing update', 'title'), False, False, 0)
         state = update_check.status()
-        pending = update_check.pending_updates(state)
-        if pending:
-            entry = pending[0][1]
+        entry = (state.get('updates') or {}).get(sha)
+        if entry:
             name = update_check.display_name(entry)
             body.pack_start(label(name, 'row-title'), False, False, 0)
             body.pack_start(label(entry.get('detail') or name, 'subtitle'), False, False, 0)
@@ -65,6 +65,7 @@ class ProgressWindow(Gtk.Window):
         self.outcome = label('Starting…', 'feedback')
         body.pack_start(self.outcome, False, False, 0)
         self.close_button = Gtk.Button(label='Close')
+        self.close_button.set_tooltip_text('Close update progress after it finishes')
         self.close_button.get_style_context().add_class('secondary')
         self.close_button.connect('clicked', lambda *_: self.destroy())
         body.pack_start(self.close_button, False, False, 0)
@@ -76,15 +77,26 @@ class ProgressWindow(Gtk.Window):
         active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet',
                                  'rice-update.service'], stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL).returncode == 0
-        if not active:
+        if active:
+            self.outcome.set_text('Another update is already installing.')
+            self.finished = True
+            self.close_button.show()
+        elif not entry or entry.get('applied'):
+            self.outcome.set_text('This update is no longer available to install.')
+            self.finished = True
+            self.close_button.show()
+        else:
+            update_check.write_request(sha)
             update_check.write_progress(phase='download', task='Starting update', done=0, total=0)
             result = subprocess.run(['systemctl', '--user', 'start', '--no-block',
                                      'rice-update.service'], capture_output=True, text=True)
             if result.returncode:
+                update_check.REQUEST_FILE.unlink(missing_ok=True)
                 update_check.write_progress(phase='failed',
                     task=(result.stderr.strip() or 'Could not start the update service')[:180],
                     done=0, total=0)
-        GLib.timeout_add(180, self.refresh)
+        if not self.finished:
+            GLib.timeout_add(180, self.refresh)
 
     def add_stage(self, body, title):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=7)
@@ -155,6 +167,10 @@ class ProgressWindow(Gtk.Window):
 
 
 def main():
+    sha = sys.argv[1] if len(sys.argv) == 2 else ''
+    if not re.fullmatch(r'[0-9a-f]{12}', sha):
+        print('usage: rice-update-progress SHA12', file=sys.stderr)
+        return 2
     update_check.STATE.mkdir(parents=True, exist_ok=True)
     lock = (update_check.STATE / 'update-progress-window.lock').open('w')
     try:
@@ -168,7 +184,7 @@ def main():
     css.load_from_path(str(library / 'panels.css'))
     Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), css,
                                               Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-    window = ProgressWindow()
+    window = ProgressWindow(sha)
     window.connect('destroy', Gtk.main_quit)
     window.present()
     Gtk.main()

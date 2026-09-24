@@ -8,8 +8,19 @@ PopupWindow {
     property Item trigger
     property bool shown: false
     property bool nativeReady: false
+    property bool hasCode: false
+    property bool hasKitty: false
+    property bool hasBtop: false
+    property bool hasBattery: false
     property bool devEnabled: false
     property string profile: ""
+    property string confirmedProfile: ""
+    property string profileReported: ""
+    property string requestedProfile: ""
+    property string runningProfile: ""
+    property string profileError: ""
+    property int profileReads: 0
+    property bool managerReady: false
     property int brightnessValue: 50
     property bool brightnessAvailable: false
     property bool spotifyEnabled: true
@@ -17,7 +28,15 @@ PopupWindow {
     property string clockFormat: "24h"
     property var updateState: ({})
     property var pendingUpdate: newestUpdate()
+    property string hoverInfo: ""
+    property string actionInfo: ""
     signal closeRequested()
+
+    function announce(message) {
+        actionInfo = message
+        infoReset.restart()
+    }
+    Timer { id: infoReset; interval: 1800; onTriggered: panel.actionInfo = "" }
 
     Process {
         command: ["test", "-f", Quickshell.env("HOME") + "/.local/share/rice/source/dev/dev-options.py"]
@@ -35,15 +54,19 @@ PopupWindow {
     grabFocus: true
     onVisibleChanged: {
         if (visible) {
-            profileRead.running = true
+            if (hasBattery) profileRead.running = true
             brightnessRead.running = true
             updateFile.reload()
         } else if (shown) closeRequested()
     }
     function executable(name, args) {
         var home = Quickshell.env("HOME")
+        if (managerReady) {
+            Quickshell.execDetached(["waybar-manager.exec", name].concat(args || []))
+            return
+        }
         if (nativeReady) {
-            Quickshell.execDetached([home + "/.local/bin/" + name].concat(args || []))
+            Quickshell.execDetached([name].concat(args || []))
             return
         }
         var command = []
@@ -51,13 +74,13 @@ PopupWindow {
             command = ["tlpctl", "set", name === "rice-profile-saver" ? "power-saver" : name === "rice-profile-fast" ? "performance" : "balanced"]
         else if (name === "rice-brightness-set") command = ["brightnessctl", "set", args[0] + "%"]
         else if (name === "rice-clock-12" || name === "rice-clock-24")
-            command = [home + "/.local/bin/rice-clock", "set", name.endsWith("12") ? "12h" : "24h"]
+            command = ["rice-clock", "set", name.endsWith("12") ? "12h" : "24h"]
         else if (name.indexOf("rice-spotify-") === 0 || name.indexOf("rice-browser-") === 0)
-            command = [home + "/.local/bin/rice-media", "set", name.indexOf("rice-spotify-") === 0 ? "desktop_spotify" : "browser_media", name.endsWith("-on") ? "on" : "off"]
-        else if (name === "rice-update-check") command = [home + "/.local/bin/rice-update", "check"]
-        else if (name === "rice-update-ignore") command = [home + "/.local/share/rice/source/src/bin/rice-update", "ignore", args[0]]
-        else if (name === "rice-show-update") command = [home + "/.local/bin/desktop-panel", "updates"]
-        else if (name.indexOf("rice-show-") === 0) command = [home + "/.local/bin/desktop-panel", name.slice(10)]
+            command = ["rice-media", "set", name.indexOf("rice-spotify-") === 0 ? "desktop_spotify" : "browser_media", name.endsWith("-on") ? "on" : "off"]
+        else if (name === "rice-update-check") command = ["rice-update", "check"]
+        else if (name === "rice-update-ignore") command = ["rice-update", "ignore", args[0]]
+        else if (name === "rice-show-update") command = ["desktop-panel", "updates:" + args[0]]
+        else if (name.indexOf("rice-show-") === 0) command = ["desktop-panel", name.slice(10)]
         else if (name === "rice-system-monitor") command = ["kitty", "btop"]
         else if (name === "rice-desktop-config") command = ["code", home + "/.local/share/rice/source"]
         else if (name === "rice-share-idea") command = ["xdg-open", "https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice/issues/new"]
@@ -76,21 +99,77 @@ PopupWindow {
         closeRequested()
         executable("rice-show-" + page)
     }
+    function openStandalone(actionName, fallback) {
+        closeRequested()
+        Quickshell.execDetached(managerReady ? ["waybar-manager.exec", actionName] : fallback)
+    }
     function setProfile(value) {
+        requestedProfile = value
         profile = value
-        executable(value === "power-saver" ? "rice-profile-saver" :
-                   value === "balanced" ? "rice-profile-balanced" : "rice-profile-fast")
-        profileRefresh.restart()
+        profileError = ""
+        profileReads = 0
+        announce("Setting power mode to " + (value === "power-saver" ? "Saver" : value === "balanced" ? "Balanced" : "Fast") + "…")
+        profileRead.running = false
+        if (!profileWrite.running) startProfileWrite()
+    }
+    function startProfileWrite() {
+        if (!requestedProfile || profileWrite.running) return
+        runningProfile = requestedProfile
+        var action = runningProfile === "power-saver" ? "saver" :
+                     runningProfile === "balanced" ? "balanced" : "fast"
+        profileWrite.command = managerReady ? ["waybar-manager.exec", "power-" + action + "-button"] :
+                               nativeReady ? ["rice-profile-" + action] :
+                               ["tlpctl", "set", runningProfile]
+        profileWrite.running = true
     }
 
     Process {
         id: profileRead
-        command: panel.nativeReady ? [Quickshell.env("HOME") + "/.local/bin/rice-profile-current"] : ["tlpctl", "get"]
-        stdout: SplitParser { onRead: line => panel.profile = line.trim() }
+        command: panel.nativeReady ? ["rice-profile-current"] : ["tlpctl", "get"]
+        stdout: SplitParser { onRead: line => panel.profileReported = line.trim() }
+        onExited: (code) => {
+            if (profileWrite.running) return
+            if (!panel.requestedProfile) {
+                if (code === 0 && panel.profileReported) {
+                    panel.profile = panel.profileReported
+                    panel.confirmedProfile = panel.profileReported
+                }
+                return
+            }
+            if (code === 0 && panel.profileReported === panel.requestedProfile) {
+                panel.profile = panel.profileReported
+                panel.confirmedProfile = panel.profileReported
+                panel.requestedProfile = ""
+                panel.announce("Power mode set to " + panel.profileReported)
+            } else if (++panel.profileReads < 8) {
+                profileRefresh.restart()
+            } else {
+                panel.requestedProfile = ""
+                panel.profile = panel.profileReported || panel.confirmedProfile
+                panel.profileError = "Power mode did not change"
+                panel.announce(panel.profileError)
+            }
+        }
+    }
+    Process {
+        id: profileWrite
+        onExited: (code) => {
+            if (panel.requestedProfile !== panel.runningProfile) {
+                Qt.callLater(function() { panel.startProfileWrite() })
+                return
+            }
+            if (code !== 0) {
+                panel.requestedProfile = ""
+                panel.profile = panel.confirmedProfile
+                panel.profileError = "Could not set power mode"
+                panel.announce(panel.profileError)
+            }
+            profileRefresh.restart()
+        }
     }
     Process {
         id: brightnessRead
-        command: panel.nativeReady ? [Quickshell.env("HOME") + "/.local/bin/rice-brightness-current"] : ["brightnessctl", "-m"]
+        command: panel.nativeReady ? ["rice-brightness-current"] : ["brightnessctl", "-m"]
         stdout: SplitParser {
             onRead: line => {
                 var value = Number(panel.nativeReady ? line.trim() : (line.split(",")[3] || "").replace("%", ""))
@@ -101,7 +180,10 @@ PopupWindow {
             }
         }
     }
-    Timer { id: profileRefresh; interval: 160; onTriggered: profileRead.running = true }
+    Timer { id: profileRefresh; interval: 150; onTriggered: {
+        panel.profileReported = ""
+        profileRead.running = true
+    } }
     Timer {
         id: brightnessCommit
         interval: 90
@@ -151,10 +233,11 @@ PopupWindow {
         property string glyph: ""
         property string label: ""
         property bool selected: false
+        property string info: label
         signal chosen()
         height: 38
         radius: 12
-        color: selected ? "#f1f1f1" : "#292929"
+        color: pointer.pressed ? "#626262" : selected ? "#f1f1f1" : pointer.containsMouse ? "#353535" : "#292929"
         border.width: selected ? 0 : 1
         border.color: "#393939"
         Row {
@@ -175,17 +258,21 @@ PopupWindow {
                 font.weight: parent.parent.selected ? Font.DemiBold : Font.Normal
             }
         }
-        MouseArea { anchors.fill: parent; onClicked: parent.chosen() }
+        MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true
+            onEntered: panel.hoverInfo = parent.info
+            onExited: { if (panel.hoverInfo === parent.info) panel.hoverInfo = "" }
+            onClicked: { panel.announce(parent.info); parent.chosen() } }
     }
     component MenuRow: Rectangle {
         property string glyph: ""
         property string title: ""
         property string detail: ""
+        property string info: detail ? title + " · " + detail : title
         signal chosen()
         width: parent ? parent.width : 340
         height: 48
         radius: 9
-        color: pointer.containsMouse ? "#292929" : "transparent"
+        color: pointer.pressed ? "#424242" : pointer.containsMouse ? "#292929" : "transparent"
         Text {
             x: 10; anchors.verticalCenter: parent.verticalCenter
             text: parent.glyph
@@ -198,18 +285,22 @@ PopupWindow {
         }
         Text { anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter
             text: "›"; color: "#a3a3a3"; font.pixelSize: 20 }
-        MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true; onClicked: parent.chosen() }
+        MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true
+            onEntered: panel.hoverInfo = parent.info
+            onExited: { if (panel.hoverInfo === parent.info) panel.hoverInfo = "" }
+            onClicked: { panel.announce(parent.title); parent.chosen() } }
     }
     component SourceRow: Rectangle {
         property string glyph: "♫"
         property string title: ""
         property string detail: ""
         property bool enabled: false
+        property string info: title + " · " + detail
         signal toggled(bool value)
         width: parent ? parent.width : 340
         height: 49
         radius: 9
-        color: pointer.containsMouse ? "#292929" : "transparent"
+        color: pointer.pressed ? "#424242" : pointer.containsMouse ? "#292929" : "transparent"
         Text { x: 10; anchors.verticalCenter: parent.verticalCenter; text: parent.glyph
             color: "#e8e8e8"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 17 }
         Column {
@@ -225,7 +316,10 @@ PopupWindow {
             Rectangle { x: parent.parent.enabled ? parent.width - width - 2 : 2; y: 2
                 width: 16; height: 16; radius: 8; color: parent.parent.enabled ? "#1b1b1b" : "#c8c8c8" }
         }
-        MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true; onClicked: parent.toggled(!parent.enabled) }
+        MouseArea { id: pointer; anchors.fill: parent; hoverEnabled: true
+            onEntered: panel.hoverInfo = parent.info
+            onExited: { if (panel.hoverInfo === parent.info) panel.hoverInfo = "" }
+            onClicked: { panel.announce(parent.title + (parent.enabled ? " off" : " on")); parent.toggled(!parent.enabled) } }
     }
 
     Rectangle {
@@ -249,14 +343,19 @@ PopupWindow {
                     Text { text: "↻"; color: refreshArea.containsMouse ? "#ffffff" : "#b5b5b5"; font.pixelSize: 20;
                         width: 32; horizontalAlignment: Text.AlignHCenter
                         MouseArea { id: refreshArea; anchors.fill: parent; hoverEnabled: true;
-                            onClicked: { panel.executable("rice-update-check"); profileRead.running = true; brightnessRead.running = true } } }
+                            onEntered: panel.hoverInfo = panel.hasBattery ? "Refresh updates, power mode and brightness" : "Refresh updates and brightness"
+                            onExited: panel.hoverInfo = ""
+                            onClicked: { panel.announce("Refreshing desktop status…"); panel.executable("rice-update-check"); if (panel.hasBattery) profileRead.running = true; brightnessRead.running = true } } }
                     Text { text: "×"; color: closeArea.containsMouse ? "#ffffff" : "#b5b5b5"; font.pixelSize: 20;
                         width: 32; horizontalAlignment: Text.AlignHCenter
-                        MouseArea { id: closeArea; anchors.fill: parent; hoverEnabled: true; onClicked: panel.closeRequested() } }
+                        MouseArea { id: closeArea; anchors.fill: parent; hoverEnabled: true;
+                            onEntered: panel.hoverInfo = "Close Quick settings"
+                            onExited: panel.hoverInfo = ""
+                            onClicked: panel.closeRequested() } }
                 }
                 Flickable {
                     width: parent.width
-                    height: parent.height - 42
+                    height: parent.height - 82
                     clip: true
                     contentWidth: width
                     contentHeight: content.implicitHeight + 8
@@ -270,7 +369,7 @@ PopupWindow {
                         MenuRow {
                             visible: panel.pendingUpdate !== null
                             glyph: ""
-                            title: "Download update"
+                            title: "View update"
                             detail: panel.pendingUpdate ?
                                     ((panel.pendingUpdate.kind === "mandatory" ? "Mandatory · " : "") +
                                      panel.pendingUpdate.count + " new · " + panel.pendingUpdate.detail) : ""
@@ -282,7 +381,7 @@ PopupWindow {
                             }
                         }
                         Choice { visible: panel.pendingUpdate !== null && panel.pendingUpdate.kind !== "mandatory";
-                            width: 84; label: "Ignore"
+                            width: 84; label: "Ignore"; info: "Hide this update from Quick settings; keep it in history"
                             onChosen: panel.executable("rice-update-ignore", [panel.pendingUpdate.sha]) }
                         SectionTitle { text: "QUICK CONTROLS" }
                         Grid {
@@ -296,11 +395,12 @@ PopupWindow {
                                     {glyph: "󰍹", name: "Displays", page: "display"}
                                 ]
                                 Choice { width: (content.width - 7) / 2; glyph: modelData.glyph; label: modelData.name;
+                                    info: "Open " + modelData.name + " controls"
                                     onChosen: panel.openPage(modelData.page) }
                             }
                         }
                         Item { width: 1; height: 7 }
-                        SectionTitle { text: "DISPLAY & POWER" }
+                        SectionTitle { visible: panel.brightnessAvailable || panel.hasBattery; text: "DISPLAY & POWER" }
                         Rectangle {
                             visible: panel.brightnessAvailable
                             width: parent.width; height: 82; radius: 10; color: "#252729"
@@ -313,7 +413,9 @@ PopupWindow {
                                 id: brightnessSlider
                                 x: 10; y: 38; width: parent.width - 20; height: 34
                                 from: 2; to: 100; value: panel.brightnessValue
-                                onMoved: { panel.brightnessValue = Math.round(value); brightnessCommit.restart() }
+                                hoverEnabled: true
+                                onHoveredChanged: panel.hoverInfo = hovered ? "Change display brightness" : ""
+                                onMoved: { panel.brightnessValue = Math.round(value); panel.announce("Brightness " + panel.brightnessValue + "%"); brightnessCommit.restart() }
                                 background: Rectangle {
                                     x: brightnessSlider.leftPadding
                                     y: brightnessSlider.topPadding + brightnessSlider.availableHeight / 2 - height / 2
@@ -324,20 +426,23 @@ PopupWindow {
                                 handle: Rectangle {
                                     x: brightnessSlider.leftPadding + brightnessSlider.visualPosition * (brightnessSlider.availableWidth - width)
                                     y: brightnessSlider.topPadding + brightnessSlider.availableHeight / 2 - height / 2
-                                    width: 15; height: 15; radius: 8; color: "#f6f6f6"
+                                    width: 15; height: 15; radius: 8; color: brightnessSlider.pressed ? "#ffffff" : "#f6f6f6"
                                 }
                             }
                         }
-                        Text { text: "Power mode"; color: "#a4a4a4"; font.family: "Adwaita Sans"; font.pixelSize: 11; leftPadding: 2 }
+                        Text { visible: panel.hasBattery; text: "Power mode"; color: "#a4a4a4"; font.family: "Adwaita Sans"; font.pixelSize: 11; leftPadding: 2 }
                         Row {
+                            visible: panel.hasBattery
                             width: parent.width; spacing: 7
-                            Choice { width: (parent.width - 14) / 3; label: "Saver"; selected: panel.profile === "power-saver";
+                            Choice { width: (parent.width - 14) / 3; label: "Saver"; info: "Use less power"; selected: panel.profile === "power-saver";
                                 onChosen: panel.setProfile("power-saver") }
-                            Choice { width: (parent.width - 14) / 3; label: "Balanced"; selected: panel.profile === "balanced";
+                            Choice { width: (parent.width - 14) / 3; label: "Balanced"; info: "Balance power and speed"; selected: panel.profile === "balanced";
                                 onChosen: panel.setProfile("balanced") }
-                            Choice { width: (parent.width - 14) / 3; label: "Fast"; selected: panel.profile === "performance";
+                            Choice { width: (parent.width - 14) / 3; label: "Fast"; info: "Favor performance"; selected: panel.profile === "performance";
                                 onChosen: panel.setProfile("performance") }
                         }
+                        Text { visible: panel.hasBattery && panel.profileError !== ""; text: panel.profileError; color: "#ededed";
+                            font.family: "Adwaita Sans"; font.pixelSize: 11 }
                         Item { width: 1; height: 7 }
                         SectionTitle { text: "MEDIA SOURCES" }
                         SourceRow { title: "Spotify app"; detail: "Show playback controls while open";
@@ -349,9 +454,9 @@ PopupWindow {
                         Item { width: 1; height: 7 }
                         SectionTitle { text: "CLOCK" }
                         Row { width: parent.width; spacing: 7
-                            Choice { width: (parent.width - 7) / 2; label: "24 hour"; selected: panel.clockFormat === "24h";
+                            Choice { width: (parent.width - 7) / 2; label: "24 hour"; info: "Use the 24-hour clock"; selected: panel.clockFormat === "24h";
                                 onChosen: { panel.clockFormat = "24h"; panel.executable("rice-clock-24") } }
-                            Choice { width: (parent.width - 7) / 2; label: "12 hour"; selected: panel.clockFormat === "12h";
+                            Choice { width: (parent.width - 7) / 2; label: "12 hour"; info: "Use the 12-hour clock"; selected: panel.clockFormat === "12h";
                                 onChosen: { panel.clockFormat = "12h"; panel.executable("rice-clock-12") } }
                         }
                         Item { width: 1; height: 7 }
@@ -359,28 +464,43 @@ PopupWindow {
                         MenuRow {
                             visible: panel.pendingUpdate === null
                             glyph: "↻"
-                            title: panel.updateState.error ? "Update check failed" :
-                                   panel.updateState.checked ? "Rice is up to date" : "Check for updates"
-                            detail: panel.updateState.error || "Check for updates"
+                            title: "Check for updates"
+                            detail: panel.updateState.error ||
+                                    (panel.updateState.available ? "New release detected · load its details" :
+                                     panel.updateState.checked ? "No new updates at last check" : "Check for new releases")
                             onChosen: panel.executable("rice-update-check")
                         }
                         MenuRow { glyph: ""; title: "Update history"; detail: "New, old and ignored updates";
                             onChosen: panel.openPage("updates") }
+                        MenuRow { glyph: "󰙨"; title: "Tutorial"; detail: "Tour the desktop with safe mock windows";
+                            onChosen: panel.openStandalone("tutorial-open-button", ["rice-tutorial"]) }
+                        MenuRow { glyph: "󰍉"; title: "Command palette"; detail: "Search desktop actions · Super + Space";
+                            onChosen: panel.openStandalone("command-palette-open-button", ["rice-command-palette"]) }
                         Item { width: 1; height: 7 }
                         SectionTitle { text: "MORE" }
                         MenuRow { visible: panel.devEnabled; glyph: "󰅪"; title: "Dev Options";
                             detail: "Check errors and active machines";
-                            onChosen: {
-                                panel.closeRequested()
-                                Quickshell.execDetached(["python3", Quickshell.env("HOME") + "/.local/share/rice/source/dev/dev-options.py"])
-                            } }
-                        MenuRow { glyph: "󰍛"; title: "System monitor"; detail: "CPU, memory and processes";
+                            onChosen: panel.openStandalone("dev-options-open-button",
+                                ["python3", Quickshell.env("HOME") + "/.local/share/rice/source/dev/dev-options.py"]) }
+                        MenuRow { visible: panel.hasKitty && panel.hasBtop; glyph: "󰍛"; title: "System monitor"; detail: "CPU, memory and processes";
                             onChosen: { panel.closeRequested(); panel.executable("rice-system-monitor") } }
-                        MenuRow { glyph: ""; title: "Desktop configuration"; detail: "Personalize this desktop";
+                        MenuRow { visible: panel.hasCode; glyph: ""; title: "Desktop configuration"; detail: "Personalize this desktop";
                             onChosen: { panel.closeRequested(); panel.executable("rice-desktop-config") } }
                         MenuRow { glyph: "󰇮"; title: "Share an idea"; detail: "Suggest an improvement on GitHub";
                             onChosen: { panel.closeRequested(); panel.executable("rice-share-idea") } }
                     }
+                }
+                Text {
+                    width: parent.width
+                    height: 30
+                    text: panel.actionInfo || panel.hoverInfo || "Hover a control for details"
+                    color: panel.actionInfo ? "#f0f0f0" : "#a4a4a4"
+                    font.family: "Adwaita Sans"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
                 }
             }
         }

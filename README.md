@@ -15,7 +15,7 @@ cd ~/config
 ./Installer --uninstall  # asks for feedback, then restores prior files
 ```
 
-The installer asks one question at a time: clock format, desktop and browser media, display scale, Wi-Fi, Bluetooth, Arch dependencies, and optional active-machine counting. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. After the final choice, a centered progress window shows local compilation, settings, wallpaper, and service stages. A terminal progress display is used outside a Wayland session. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
+The installer asks one question at a time: clock format, desktop and browser media, display scale, Wi-Fi, Bluetooth, and Arch dependencies. Review your answers at the end, then choose whether to install. Arrow keys move between answers; Enter selects. After the final choice, a centered progress window shows local compilation, settings, wallpaper, and service stages. A terminal progress display is used outside a Wayland session. A fresh install then opens a guided tutorial made of inert model windows; the tutorial button is its only working control. Run `./Installer --install` for a non-interactive refresh. Set `NO_COLOR=1` for plain terminal output. The short `./install.sh` wrapper also works.
 
 The install links this checkout at `~/.local/share/rice/source`. Keep the checkout after installing. It first checks dependencies, compiles C++ sources in a temporary directory, and saves one pre-install snapshot under `~/.local/state/rice/pre-install/`. It then deploys commands and configs and swaps out a running Waybar immediately before starting the QuickShell bar. Edit sources in `src/`, then run `./Installer --install` to deploy them. QuickShell reads its QML from this checkout. To regenerate the remaining Lua-produced configs, use `lua src/config/apply.lua`.
 
@@ -48,6 +48,18 @@ The installer creates `~/.config/rice/WiFi-Options.json` and `Bluetooth-Options.
 
 An older encrypted preference file is supported at `~/.config/rice/private.json.enc`; edit it with `python3 src/data/edit.py` if you already use it. The installer migrates a local legacy copy when present. See [src/data/README.md](src/data/README.md).
 
+## Counter-Strike 2 game mode
+
+The installer's Arch package step includes `gamemode`. Set **Counter-Strike 2 → Properties → Launch Options** in Steam to:
+
+```text
+rice-cs2 %command%
+```
+
+The rice installer copies `rice-cs2` to `~/.local/bin`. This requests Feral GameMode only while CS2 runs. Add your user to the `gamemode` group and log out and back in once so its privileged governor controls work. GameMode can temporarily request a performance CPU governor and platform profile, increase game I/O priority, and inhibit idle handling. The Radeon 680M shares power and memory with the CPU, so a fixed 60% GPU reservation is unavailable; CS2 can use available GPU capacity as needed. Steam and CS2 are installed separately.
+
+After launching CS2, check `gamemoded -s`. AC power gives the laptop more thermal and power headroom than battery operation.
+
 ## Media controls
 
 **Desktop Spotify** is enabled by default. **Browser media** is optional in the installer and live Media settings. It can use Spotify Web, SoundCloud, YouTube Music, and other sites when your browser exposes an MPRIS player through the desktop. Supported browser player names include Chromium, Chrome, Brave, Firefox, Vivaldi, Edge, and Opera. The bar shows media controls only while an enabled player is available. Play/pause, next/previous, cover art, and available repeat/shuffle controls use the same actions in the bar and Media page. Album details appear on cover hover after 300 ms.
@@ -60,13 +72,21 @@ Native actions signal the bar to refresh after a change. The C++ status readers 
 
 QuickShell runs the topbar through `rice-bar.service` and reads `src/quickshell/shell.qml` directly from the checkout. The installer restarts that service after an update; `systemctl --user restart rice-bar.service` refreshes it manually. Bar engine selection is no longer part of setup or Settings.
 
-The gear opens a persistent QuickShell Settings card with quick controls, brightness, power mode, media sources, clock, and updates. A pending **Download update** button sits at the top. Changing a value updates its control in place, without rebuilding the menu. Device and update detail pages still use the resident GTK controls. The installer compiles `rice-status` and `rice-actions` with Qt 6, then links 51 named `rice-*` action commands to the small C++ action executable. QuickShell reads the incremental native status stream and calls these direct actions. Until the native programs are installed, the current bar uses its existing helpers. `g++`, `pkg-config`, and Qt 6 Core/DBus/Concurrent development files are required to build them. No compiled binaries are stored in the repository.
+The gear opens a persistent QuickShell Settings card with quick controls, brightness, power mode on battery-equipped PCs, media sources, clock, and updates. A pending **View update** button sits at the top. Changing a value updates its control in place, without rebuilding the menu. Device and update detail pages still use the resident GTK controls. The installer compiles `rice-status` and `rice-actions` with Qt 6, then links 51 named `rice-*` action commands to the small C++ action executable. QuickShell reads the incremental native status stream and calls these direct actions. The bar resolves installed helpers and apps through its service `PATH`; buttons for unavailable optional apps such as VS Code stay hidden. VS Code is not installed by the rice. Until the native programs are installed, the current bar uses its existing helpers. `g++`, `pkg-config`, and Qt 6 Core/DBus/Concurrent development files are required to build them. No compiled binaries are stored in the repository.
 
 The clock can be changed to 12 or 24 hour format in the installer, live Settings menu, or with `rice-clock set 12h|24h`. Its setting is in `~/.config/rice/settings.json`.
 
 Put images in `wallpaper/`. **Super+T** changes wallpaper and generates the QuickShell palette in the same action. QuickShell watches that file and changes colors without restarting. Original images are untouched. The generated palette is in `~/.local/state/rice/palette.json`.
 
 The sampled colors for each image are cached in `~/.cache/rice/wallpaper-palettes/`. Later visits reuse that palette; changing an image's size or modification time recomputes it.
+
+## First-install tutorial
+
+After a successful first install, **Open tutorial** appears in the install progress window. The tour is a centered overlay with a drawn version of the rice bar, Quick settings, and a Sound page using the real GTK row styling. It uses example values and no screenshots. Every control inside those model windows is inert; only the tutorial's Next / Finish button advances it. If you install from a terminal without a desktop session or close the tour early, it opens at the next Hyprland login. It does not reopen after completion or ordinary updates. To see it again, choose **Tutorial** in Quick settings under Rice.
+
+## Command palette
+
+Press **Super+Space** to search rice actions by plain names. It opens sound, network, Bluetooth, displays, media, clipboard history, screenshots, wallpaper switching, updates, lock and power; installed applications such as VS Code appear when available. Selecting an action uses the same helper as the bar or existing menus. **Super+R** still opens applications. The palette is also available from Quick settings under Rice.
 
 The installer detects the primary output in a running Hyprland session and writes local display rules in `~/.config/rice/display-device.tsv` and `monitors.conf`. Adjust scale in the installer or live Displays menu. Connected secondary displays can be mirrored or extended from Displays; their choices live in `~/.config/rice/display-layout.tsv`. On another machine, review these local files rather than copying this laptop's output names. The Lua source used at login is `src/config/hyprland.lua`; a text fallback is `src/native/hyprland.conf`.
 
@@ -78,13 +98,15 @@ The installer records the last deployed commit separately from the checkout's Gi
 
 Every commit is tracked on its own in `~/.local/state/rice/update.json` under `updates`, keyed by its twelve character Git hash. New releases also have a five-digit hex ID, starting at `0x00001`, shown in the update UI. Entries contain `new`, `summary`, `detail`, `kind` (`optional`, `recommended`, or `mandatory`), `applied` and `when` fields:
 
-- **Download update** appears at the top of Settings while an update is new. An **Ignore** button sits beside optional and recommended updates; it flips `new` to false while leaving the entry in history. Mandatory updates cannot be ignored, but installation still starts only after the user chooses it.
-- Clicking **Download update** closes Settings and opens a centered confirmation window with the update description. **Install** opens a persistent progress window, then starts `rice-update.service`. Git reports its actual transfer counts, and the installer reports completed stages; work with no measurable total shows activity without a made-up percentage. The window stays open until installation succeeds or fails.
+- **View update** appears at the top of Settings while an update is new. An **Ignore** button sits beside optional and recommended updates; it flips `new` to false while leaving the entry in history. Mandatory updates cannot be ignored, but installation still starts only after the user chooses it.
+- Clicking **View update** closes Settings and opens a centered confirmation window with the update description. **Install** opens a persistent progress window, then starts `rice-update.service`. Git reports its actual transfer counts, and the installer reports completed stages; work with no measurable total shows activity without a made-up percentage. The window stays open until installation succeeds or fails.
 - **Update history** in the Rice section opens the same centered window listing every known update with a one line description and its priority tag. Clicking an entry opens its detail overlay; applied updates show when they landed, and ignored ones can still be downloaded from there.
 
-## Optional active-machine count
+Installing from an update's detail view deploys that selected release and leaves later releases pending. When possible, the updater advances the normal source checkout; an older selection uses an isolated Git worktree. PCs without a battery do not show the Saver, Balanced, or Fast controls.
 
-The installer asks whether this PC may count as active. With consent, an update check sends a hash derived from `/etc/machine-id` at most once every four hours. It never sends the raw machine ID. The count service keeps only the hash and last check-in time, counts each machine once, and drops it from the active count after 30 days without a check-in. This has no effect on the rice installed on that PC. Counting is currently disabled until an HTTPS endpoint is configured in `src/data/telemetry.json`; update checks continue normally. [Server setup](src/telemetry/README.md) explains the small self-hosted counter.
+## Active-machine count
+
+The installer enables active-machine counting without asking during setup. Once an HTTPS endpoint is configured, an update check sends a hash derived from `/etc/machine-id` at most once every four hours. It never sends the raw machine ID. The count service keeps only the hash and last check-in time, counts each machine once, and drops it from the active count after 30 days without a check-in. This has no effect on the rice installed on that PC. The endpoint in `src/data/telemetry.json` is currently blank, so no check-ins are sent yet; update checks continue normally. [Server setup](src/telemetry/README.md) explains the small self-hosted counter.
 
 Descriptions and IDs come from `src/data/updates.json`, then `Rice-Update-Summary` / `Rice-Update-Detail` / `Rice-Update-Kind` / `Rice-Update-ID` commit trailers, then the commit subject itself. When nothing is new, the Rice row checks again on click.
 
@@ -93,6 +115,10 @@ Check or apply from a terminal with `rice-update check` and `rice-update apply`.
 ## Controls and troubleshooting
 
 The bar's audio widget adjusts volume by wheel, mutes on left click, toggles the 100%/150% ceiling on middle click, and opens output/app volume on right click. The network and Bluetooth widgets open their control menus. The clock and battery show information without click actions. The media cover opens the Media page; hover shows track details. Workspace buttons 1–5 stay visible, along with every workspace containing a window and the current workspace even when empty. A thin outline marks a workspace requesting attention (for example, when Brave opens a tab there from another workspace); visiting it clears the outline. Buttons switch via Hyprland's dispatch API.
+
+Bar and Quick settings clicks call `waybar-manager.exec ACTION [ARGS...]`, which runs the matching installed `~/.local/lib/rice/actions/ACTION.exec`. The name is retained for the requested command interface; the bar itself is QuickShell. The manager only validates and routes action names. For example, `waybar-manager.exec display-open-button` opens Displays, and `waybar-manager.exec controll-size-of-spotify-manage-buttons 26` sets the previous/play/next button glyph size to 26 pixels (16–26 accepted). Each action file chooses its corresponding command. Quick settings waits for a power-mode action to complete and confirms the actual mode before clearing the pending selection.
+
+Controls show what they do on hover and respond visibly when pressed. Bar buttons use the rice's styled information popup for action requests; Quick settings shows details and action feedback in its bottom information area. Deeper control pages use monochrome hover descriptions. Power mode reports the confirmed setting or an error.
 
 The Sound page lists available output routes, including laptop speakers and a wired headset even when the audio card exposes them through separate profiles. Choosing one switches the profile, sets the default output, and moves playing applications. It also shows microphone choices and their mute state; choosing an input moves active capture applications such as Discord and unmutes that input. Switching outputs preserves the current microphone route and mute state.
 

@@ -1,4 +1,4 @@
-# Optional active-machine counter
+# Active-machine counter
 
 `server.py` is a small standard-library Python service. It accepts anonymous
 `POST /check-in` requests with a 64-character hash derived from a machine ID,
@@ -10,7 +10,7 @@ only the count; it does not affect that PC's installation.
 The server binds to `127.0.0.1:8765`. Put it behind an HTTPS reverse proxy with
 rate limits before setting its public URL in `src/data/telemetry.json`. Keep the
 SQLite database and `RICE_COUNTER_ADMIN_TOKEN` outside the Git checkout. The
-public client requires the user's opt-in in `~/.config/rice/telemetry.json`.
+public client is enabled by the installer in `~/.config/rice/telemetry.json`.
 Without a configured HTTPS endpoint, it sends nothing.
 
 Example local start:

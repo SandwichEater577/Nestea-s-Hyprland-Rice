@@ -26,7 +26,7 @@ EOF
 }
 
 check() {
-    local programs=(Hyprland quickshell lua python3 git nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq g++ pkg-config brightnessctl notify-send zenity wl-paste cliphist hypridle hyprlock xdg-open fastfetch btop code)
+    local programs=(Hyprland quickshell lua python3 git nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq g++ pkg-config brightnessctl notify-send zenity wl-paste cliphist hypridle hyprlock xdg-open fastfetch btop)
     local missing=() item net bt audio
     for item in "${programs[@]}"; do command -v "$item" >/dev/null || missing+=("$item"); done
     if command -v pkg-config >/dev/null && ! pkg-config --exists Qt6Core Qt6DBus Qt6Concurrent; then
@@ -63,7 +63,7 @@ deps() {
                     gcc pkgconf qt6-base qt6-declarative git
                     networkmanager bluez bluez-utils playerctl brightnessctl rofi kitty thunar hyprpaper
                     mako libnotify pipewire-pulse jq zenity wl-clipboard cliphist hypridle hyprlock
-                    hyprpolkitagent xdg-utils fastfetch btop code)
+                    hyprpolkitagent xdg-utils fastfetch btop gamemode)
     if [[ ${RICE_DESKTOP_SPOTIFY:-no} == yes ]]; then packages+=(spotify-launcher); fi
     if ! pacman -Qq tlp-pd >/dev/null 2>&1 && ! pacman -Qq power-profiles-daemon >/dev/null 2>&1 &&
        ! pacman -Qq tuned-ppd >/dev/null 2>&1; then
@@ -172,7 +172,7 @@ run_core() {
 interactive() {
     [[ $interactive_tty == true ]] || { echo 'Interactive setup needs a terminal. Use --check, --install or --help.' >&2; return 2; }
     trap restore_cursor EXIT
-    local clock desktop browser scale wifi bt packages telemetry answer current
+    local clock desktop browser scale wifi bt packages answer current
     printf '\n%s┌──────────────────────────────────────────────────────┐%s\n' "$violet" "$reset"
     printf '%s│%s  %sNestea’s Rice for Hyprland%s   %s/ setup%s                %s│%s\n' "$violet" "$reset" "$white" "$reset" "$dim" "$reset" "$violet" "$reset"
     printf '%s└──────────────────────────────────────────────────────┘%s\n' "$violet" "$reset"
@@ -181,35 +181,32 @@ interactive() {
 
     current=24h
     if [[ -f $HOME/.config/rice/settings.json ]] && grep -Eq '"time_format"[[:space:]]*:[[:space:]]*"12h"' "$HOME/.config/rice/settings.json"; then current=12h; fi
-    clock=$(choose '01 / 08  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
+    clock=$(choose '01 / 07  What should your clock format be?' "Current: $current · change it later from the live settings menu." \
         "$([[ $current == 12h ]] && printf 1 || printf 0)" \
         24h '24-hour time   [21:30:45]' 12h '12-hour time   [09:30:45 PM]') || return 0
 
     current=true
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"desktop_spotify"[[:space:]]*:[[:space:]]*false' "$HOME/.config/rice/Media-Options.json"; then current=false; fi
-    desktop=$(choose '02 / 08  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
+    desktop=$(choose '02 / 07  Show desktop Spotify controls?' 'Cover, playback, shuffle and repeat appear when Spotify runs.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, enable desktop Spotify' no 'No, keep it hidden') || return 0
 
     current=false
     if [[ -f $HOME/.config/rice/Media-Options.json ]] && grep -Eq '"browser_media"[[:space:]]*:[[:space:]]*true' "$HOME/.config/rice/Media-Options.json"; then current=true; fi
-    browser=$(choose '03 / 08  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
+    browser=$(choose '03 / 07  Include browser music players?' 'Spotify Web, SoundCloud, YouTube Music and other MPRIS players.' \
         "$([[ $current == true ]] && printf 0 || printf 1)" yes 'Yes, include browser players' no 'No, desktop players only') || return 0
 
     current=$(cat "$HOME/.config/rice/display-device.tsv" 2>/dev/null || printf 'auto\t1.0')
-    scale=$(choose '04 / 08  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
+    scale=$(choose '04 / 07  How large should the desktop look?' "Current: $current · keep uses the detected monitor setting." \
         0 keep 'Keep current scale' 1.0 '100%  [compact]' 1.25 '125%  [balanced]' 1.5 '150%  [larger]') || return 0
 
-    wifi=$(choose '05 / 08  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
+    wifi=$(choose '05 / 07  Set up Wi-Fi after installing?' 'NetworkManager stores remembered networks and passwords.' \
         0 later 'Later, use the live network menu' now 'Yes, open NetworkManager') || return 0
 
-    bt=$(choose '06 / 08  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
+    bt=$(choose '06 / 07  Pair Bluetooth devices after installing?' 'BlueZ stores pairing keys; the live bar also has a device menu.' \
         0 later 'Later, use the live Bluetooth menu' now 'Yes, open Bluetooth tools') || return 0
 
-    packages=$(choose '07 / 08  Install Arch dependencies?' 'Required programs must be present before the rice can be installed.' \
+    packages=$(choose '07 / 07  Install Arch dependencies?' 'Required programs must be present before the rice can be installed.' \
         0 yes 'Yes, install required dependencies' no 'No, use installed packages') || return 0
-
-    telemetry=$(choose '08 / 08  Count this PC as active?' 'Optional: a hashed machine ID reports at most every 4 hours; expires after 30 days.' \
-        0 no 'No, do not report' yes 'Yes, count this PC after update checks') || return 0
 
     note 'Your setup'
     note "Clock          $clock"
@@ -219,7 +216,6 @@ interactive() {
     note "Wi-Fi          $wifi"
     note "Bluetooth      $bt"
     note "Arch packages  $packages"
-    note "Active count   $telemetry"
     note ''
     if [[ $packages == yes ]]; then RICE_DESKTOP_SPOTIFY="$desktop" deps --dry-run; note ''; fi
 
@@ -231,7 +227,7 @@ interactive() {
         warn 'Required dependencies are missing. Re-run setup and choose Arch dependencies.'
         return 1
     fi
-    export RICE_CLOCK="$clock" RICE_DESKTOP_SPOTIFY="$desktop" RICE_BROWSER_MEDIA="$browser" RICE_SCALE="$scale" RICE_TELEMETRY="$telemetry"
+    export RICE_CLOCK="$clock" RICE_DESKTOP_SPOTIFY="$desktop" RICE_BROWSER_MEDIA="$browser" RICE_SCALE="$scale"
     if ! run_core; then return 1; fi
     [[ $wifi != now ]] || nmtui
     [[ $bt != now ]] || bluetoothctl

@@ -6,6 +6,9 @@ systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND
 if systemctl --user cat rice-bar.service >/dev/null 2>&1; then
     systemctl --user reset-failed rice-bar.service
     systemctl --user start rice-bar.service
+    if [[ -f $HOME/.local/state/rice/tutorial-pending ]]; then
+        "$HOME/.local/bin/rice-tutorial" --first-run >/dev/null 2>&1 &
+    fi
 else
     exec quickshell --path "$HOME/.local/share/rice/source/src/quickshell/shell.qml"
 fi

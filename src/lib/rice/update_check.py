@@ -12,9 +12,9 @@ the twelve character commit id:
     {"56e5b3e": {"new": true, "summary": "...", "detail": "...",
                  "kind": "recommended", "applied": 0, "when": 1790204500}}
 
-"new" is the only flag the UI asks about. The settings menu shows Download
-update while any entry is new, Ignore flips that entry back to false, and
-apply() marks everything installed. Descriptions are resolved in this order:
+"new" is the only flag the UI asks about. The settings menu shows View update
+while any entry is new, Ignore flips that entry back to false, and apply()
+installs the selected commit while leaving newer releases pending. Descriptions are resolved in this order:
 src/data/updates.json, then Rice-Update-* commit trailers, then the commit
 subject and body.
 """
@@ -35,6 +35,7 @@ STATE = HOME / '.local/state/rice'
 FILE = STATE / 'update.json'
 INSTALLED_REVISION = STATE / 'installed-revision'
 PROGRESS_FILE = STATE / 'update-progress.json'
+REQUEST_FILE = STATE / 'update-request.json'
 PUBLIC = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice.git'
 ISSUES = 'https://github.com/SandwichEater577/Nestea-s-Hyprland-Rice/issues/new'
 CHECK_SECONDS = 1800
@@ -129,6 +130,29 @@ def write_progress(**fields):
     temp.replace(PROGRESS_FILE)
 
 
+def write_request(sha):
+    if not re.fullmatch(r'[0-9a-f]{12}', sha):
+        raise UpdateError('Invalid update ID')
+    STATE.mkdir(parents=True, exist_ok=True)
+    temp = REQUEST_FILE.with_suffix('.tmp')
+    temp.write_text(json.dumps({'sha': sha, 'at': time.time()}) + '\n')
+    temp.replace(REQUEST_FILE)
+
+
+def take_request():
+    try:
+        data = json.loads(REQUEST_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+    REQUEST_FILE.unlink(missing_ok=True)
+    sha = data.get('sha') if isinstance(data, dict) else None
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{12}', sha):
+        raise UpdateError('Invalid update request')
+    if not isinstance(data.get('at'), (int, float)) or time.time() - data['at'] > 60:
+        raise UpdateError('Update request expired; open the update again')
+    return sha
+
+
 def notify(title, body, icon='dialog-information-symbolic', urgency=None):
     args = ['notify-send', '-a', 'Rice', '-i', icon]
     if urgency:
@@ -160,7 +184,7 @@ def notify_update(state):
     detail = f"{count} new commit{'s' if count != 1 else ''}" if count else 'New commits ready'
     if summary:
         detail += ' · ' + (summary if len(summary) <= 60 else summary[:57] + '…')
-    notify('Rice update available', detail + '\nSettings → Download update',
+    notify('Rice update available', detail + '\nSettings → View update',
            icon='software-update-available-symbolic', urgency='critical')
 
 
@@ -311,16 +335,6 @@ def _log(rev, limit=None):
     return found
 
 
-def _mark_installed(state, when=None):
-    """Everything that was waiting is now in the checkout: stop calling it new."""
-    when = when or time.time()
-    for entry in state.get('updates', {}).values():
-        if isinstance(entry, dict) and not entry.get('applied'):
-            entry['applied'] = when
-            entry['new'] = False
-    return state
-
-
 def _installed_revision():
     """Commit last deployed by the installer, independent of checkout HEAD."""
     try:
@@ -393,7 +407,7 @@ def check():
     line = _out(['ls-remote', PUBLIC, f'refs/heads/{name}'], check=False, timeout=30)
     if line:
         remote = line.split()[0]
-        local = _out(['rev-parse', 'HEAD'], check=False)
+        local = _installed_revision() or _out(['rev-parse', 'HEAD'], check=False)
         state.update(available=bool(local and remote != local), count=0,
                      sha=remote[:12], subject='', error='')
         return save(state)
@@ -401,8 +415,8 @@ def check():
     return save(state)
 
 
-def apply(progress=None):
-    """Fetch, install and report only measured transfer and completed stages."""
+def apply(selected=None, progress=None):
+    """Install one selected release snapshot and leave later releases pending."""
     if not (SOURCE / '.git').exists():
         raise UpdateError('Rice sources are not a Git checkout')
     def report(**fields):
@@ -419,11 +433,38 @@ def apply(progress=None):
 
     _run_stream(['git', '-C', str(SOURCE), 'fetch', '--progress', '--no-tags',
                  'origin', branch()], timeout=300, on_line=git_line)
+    releases = _log('FETCH_HEAD')
+    requested = selected is not None
+    selected = str(selected if requested else (releases[0][0] if releases else ''))
+    target = next((sha for sha, _, _ in releases if sha == selected), None)
+    state = status()
+    if not target or (requested and selected not in state['updates']):
+        raise UpdateError('Selected update is no longer available')
+    installed = _installed_revision()
+    if installed and _git(['merge-base', '--is-ancestor', installed, target]).returncode:
+        raise UpdateError('This update predates the installed release')
+    if state['updates'].get(target, {}).get('applied'):
+        raise UpdateError('This update is already installed')
     report(phase='download', task='Download complete', done=1, total=1)
-    report(phase='install', task='Applying Git changes', done=0, total=5)
-    _out(['merge', '--ff-only', 'FETCH_HEAD'], timeout=300)
+    report(phase='install', task='Preparing selected release', done=0, total=5)
+    head = _out(['rev-parse', 'HEAD'])
+    clean = not _out(['status', '--porcelain'], check=False)
+    if clean and _git(['merge-base', '--is-ancestor', head, target]).returncode == 0:
+        # Keep the user's normal checkout as the installed source when the
+        # selected release can safely advance it.
+        _out(['merge', '--ff-only', target], timeout=300)
+        release_dir = SOURCE.resolve()
+    else:
+        # An older selection must not reset or overwrite the user's checkout.
+        release_dir = STATE / 'releases' / target
+        if release_dir.exists():
+            if _out(['-C', str(release_dir), 'rev-parse', '--short=12', 'HEAD']) != target:
+                raise UpdateError('Selected release directory contains another revision')
+        else:
+            release_dir.parent.mkdir(parents=True, exist_ok=True)
+            _out(['worktree', 'add', '--detach', str(release_dir), target], timeout=300)
     report(phase='install', task='Applying local settings', done=1, total=5)
-    installer = SOURCE / 'Installer'
+    installer = release_dir / 'Installer'
     if not installer.exists():
         raise UpdateError('Installer missing from the checkout')
     command = [str(installer)] if os.access(installer, os.X_OK) else ['bash', str(installer)]
@@ -436,13 +477,15 @@ def apply(progress=None):
 
     install_env = _env()
     install_env['RICE_UPDATE_PROGRESS'] = '1'
-    _run_stream(command + ['--install'], cwd=str(SOURCE), timeout=1800,
+    _run_stream(command + ['--install'], cwd=str(release_dir), timeout=1800,
                 env=install_env, on_line=install_line)
-    subject = _out(['log', '-1', '--format=%s'], check=False)
-    state = status()
-    _mark_installed(state)
-    state.update(available=False, count=0, subject=subject,
-                 sha=_out(['rev-parse', '--short=12', 'HEAD'], check=False),
-                 notified_sha='', applied=time.time(), error='')
+    subject = next(body.splitlines()[0] for sha, _, body in releases if sha == target)
+    when = time.time()
+    for sha, entry in state['updates'].items():
+        if not entry.get('applied') and _git(['merge-base', '--is-ancestor', sha, target]).returncode == 0:
+            entry.update(applied=when, new=False)
+    waiting = pending_updates(state)
+    state.update(available=bool(waiting), count=len(waiting), subject=subject,
+                 sha=releases[0][0], notified_sha='', applied=when, error='')
     save(state)
     return subject
