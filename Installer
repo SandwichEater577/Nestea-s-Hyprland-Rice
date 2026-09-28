@@ -57,9 +57,8 @@ check() {
     (("${#missing[@]}" == 0))
 }
 
-deps() {
-    command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
-    local packages=(hyprland quickshell hyprsunset gtk3 gtk-layer-shell imagemagick lua python python-gobject
+arch_packages() {
+    packages=(hyprland quickshell hyprsunset gtk3 gtk-layer-shell imagemagick lua python python-gobject
                     gcc pkgconf qt6-base qt6-declarative git
                     networkmanager bluez bluez-utils playerctl brightnessctl rofi kitty thunar hyprpaper
                     mako libnotify pipewire-pulse jq zenity wl-clipboard cliphist hypridle hyprlock
@@ -69,6 +68,36 @@ deps() {
        ! pacman -Qq tuned-ppd >/dev/null 2>&1; then
         packages+=(power-profiles-daemon)
     fi
+}
+
+update_deps() {
+    command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
+    local packages=() missing=() package pacman_bin
+    arch_packages
+    for package in "${packages[@]}"; do
+        pacman -Qq "$package" >/dev/null 2>&1 || missing+=("$package")
+    done
+    ((${#missing[@]})) || return 0
+    printf 'Installing required update packages: %s\n' "${missing[*]}"
+    if [[ ${RICE_UPDATE_PROGRESS:-0} == 1 ]]; then
+        printf 'RICE_PROGRESS_STEP=1\tInstalling required packages: %s\n' "${missing[*]}" >&2
+    fi
+    pacman_bin=$(command -v pacman)
+    if ((EUID == 0)); then
+        "$pacman_bin" -S --needed --noconfirm "${missing[@]}"
+    else
+        command -v pkexec >/dev/null || { echo 'pkexec is required to install update packages.' >&2; return 1; }
+        pkexec "$pacman_bin" -S --needed --noconfirm "${missing[@]}"
+    fi
+    for package in "${missing[@]}"; do
+        pacman -Qq "$package" >/dev/null 2>&1 || { echo "Package still missing: $package" >&2; return 1; }
+    done
+}
+
+deps() {
+    command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
+    local packages=()
+    arch_packages
     printf 'Arch packages: %s\n' "${packages[*]}"
     if [[ ${1:-} == --dry-run ]]; then
         printf 'Preview only: no packages or services will be changed.\n'
@@ -261,7 +290,11 @@ uninstall() {
 case ${1:-} in
     --help|-h) usage ;;
     --check) check ;;
-    --install) check && "$core" ;;
+    --install)
+        if [[ ${RICE_UPDATE_PROGRESS:-0} == 1 ]]; then update_deps; fi
+        check && "$core"
+        ;;
+    --update-deps) update_deps ;;
     --deps) deps ;;
     --uninstall) uninstall ;;
     '') interactive ;;
