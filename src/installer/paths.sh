@@ -20,7 +20,7 @@ rice_managed_paths() {
         .local/share/rice/source \
         .config/rice/WiFi-Options.json .config/rice/Bluetooth-Options.json \
         .config/rice/Media-Options.json .config/rice/settings.json \
-        .config/rice/bar-controls.json \
+        .config/rice/bar-controls.json .config/rice/night-mode \
         .config/rice/telemetry.json \
         .config/rice/display-device.tsv .config/rice/display-layout.tsv \
         .config/rice/private.json.enc .config/rice/monitors.conf \

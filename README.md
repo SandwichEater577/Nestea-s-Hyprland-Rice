@@ -70,6 +70,8 @@ Native actions signal the bar to refresh after a change. The C++ status readers 
 
 ## Bar, clock and wallpaper
 
+Quick settings includes **Night mode** in Display & Power. Turn it on to reveal a 0–100% blue light reduction slider. The rice uses Hyprsunset for the color temperature change, remembers the chosen strength across sessions, and restores an enabled filter at login. `hyprsunset` is included in the Arch dependency list.
+
 QuickShell runs the topbar through `rice-bar.service` and reads `src/quickshell/shell.qml` directly from the checkout. The installer restarts that service after an update; `systemctl --user restart rice-bar.service` refreshes it manually. Bar engine selection is no longer part of setup or Settings.
 
 The gear opens a persistent QuickShell Settings card with quick controls, brightness, power mode on battery-equipped PCs, media sources, clock, and updates. A pending **View update** button sits at the top. Changing a value updates its control in place, without rebuilding the menu. Device and update detail pages still use the resident GTK controls. The installer compiles `rice-status` and `rice-actions` with Qt 6, then links 51 named `rice-*` action commands to the small C++ action executable. QuickShell reads the incremental native status stream and calls these direct actions. The bar resolves installed helpers and apps through its service `PATH`; buttons for unavailable optional apps such as VS Code stay hidden. VS Code is not installed by the rice. Until the native programs are installed, the current bar uses its existing helpers. `g++`, `pkg-config`, and Qt 6 Core/DBus/Concurrent development files are required to build them. No compiled binaries are stored in the repository.

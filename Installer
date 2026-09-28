@@ -26,7 +26,7 @@ EOF
 }
 
 check() {
-    local programs=(Hyprland quickshell lua python3 git nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq g++ pkg-config brightnessctl notify-send zenity wl-paste cliphist hypridle hyprlock xdg-open fastfetch btop)
+    local programs=(Hyprland quickshell hyprsunset lua python3 git nmcli bluetoothctl wpctl playerctl rofi kitty thunar hyprpaper magick pactl dbus-monitor jq g++ pkg-config brightnessctl notify-send zenity wl-paste cliphist hypridle hyprlock xdg-open fastfetch btop)
     local missing=() item net bt audio
     for item in "${programs[@]}"; do command -v "$item" >/dev/null || missing+=("$item"); done
     if command -v pkg-config >/dev/null && ! pkg-config --exists Qt6Core Qt6DBus Qt6Concurrent; then
@@ -59,7 +59,7 @@ check() {
 
 deps() {
     command -v pacman >/dev/null || { echo 'Automatic dependency setup is for Arch and EndeavourOS.' >&2; return 1; }
-    local packages=(hyprland quickshell gtk3 gtk-layer-shell imagemagick lua python python-gobject
+    local packages=(hyprland quickshell hyprsunset gtk3 gtk-layer-shell imagemagick lua python python-gobject
                     gcc pkgconf qt6-base qt6-declarative git
                     networkmanager bluez bluez-utils playerctl brightnessctl rofi kitty thunar hyprpaper
                     mako libnotify pipewire-pulse jq zenity wl-clipboard cliphist hypridle hyprlock

@@ -23,6 +23,9 @@ PopupWindow {
     property bool managerReady: false
     property int brightnessValue: 50
     property bool brightnessAvailable: false
+    property bool nightModeAvailable: false
+    property bool nightModeEnabled: false
+    property int nightModeStrength: 50
     property bool spotifyEnabled: true
     property bool browserEnabled: false
     property string clockFormat: "24h"
@@ -56,6 +59,7 @@ PopupWindow {
         if (visible) {
             if (hasBattery) profileRead.running = true
             brightnessRead.running = true
+            nightModeRead.running = true
             updateFile.reload()
         } else if (shown) closeRequested()
     }
@@ -73,6 +77,7 @@ PopupWindow {
         if (name.indexOf("rice-profile-") === 0)
             command = ["tlpctl", "set", name === "rice-profile-saver" ? "power-saver" : name === "rice-profile-fast" ? "performance" : "balanced"]
         else if (name === "rice-brightness-set") command = ["brightnessctl", "set", args[0] + "%"]
+        else if (name === "rice-night-mode") command = ["rice-night-mode"].concat(args || [])
         else if (name === "rice-clock-12" || name === "rice-clock-24")
             command = ["rice-clock", "set", name.endsWith("12") ? "12h" : "24h"]
         else if (name.indexOf("rice-spotify-") === 0 || name.indexOf("rice-browser-") === 0)
@@ -180,6 +185,24 @@ PopupWindow {
             }
         }
     }
+    Process {
+        id: nightModeRead
+        command: ["rice-night-mode", "status"]
+        stdout: SplitParser {
+            onRead: line => {
+                var parts = line.trim().split(" ")
+                panel.nightModeEnabled = parts[0] === "on"
+                var value = Number(parts[1])
+                if (!isNaN(value) && value >= 0 && value <= 100)
+                    panel.nightModeStrength = value
+            }
+        }
+    }
+    Process {
+        command: ["sh", "-c", "command -v hyprsunset >/dev/null && command -v rice-night-mode >/dev/null"]
+        running: true
+        onExited: code => panel.nightModeAvailable = code === 0
+    }
     Timer { id: profileRefresh; interval: 150; onTriggered: {
         panel.profileReported = ""
         profileRead.running = true
@@ -189,6 +212,15 @@ PopupWindow {
         interval: 90
         onTriggered: panel.executable("rice-brightness-set", [String(panel.brightnessValue)])
     }
+    Timer {
+        id: nightModeCommit
+        interval: 120
+        onTriggered: {
+            panel.executable("rice-night-mode", ["strength", String(panel.nightModeStrength)])
+            nightModeRefresh.restart()
+        }
+    }
+    Timer { id: nightModeRefresh; interval: 1800; onTriggered: nightModeRead.running = true }
     FileView {
         path: Quickshell.env("HOME") + "/.config/rice/settings.json"
         watchChanges: true
@@ -345,7 +377,7 @@ PopupWindow {
                         MouseArea { id: refreshArea; anchors.fill: parent; hoverEnabled: true;
                             onEntered: panel.hoverInfo = panel.hasBattery ? "Refresh updates, power mode and brightness" : "Refresh updates and brightness"
                             onExited: panel.hoverInfo = ""
-                            onClicked: { panel.announce("Refreshing desktop status…"); panel.executable("rice-update-check"); if (panel.hasBattery) profileRead.running = true; brightnessRead.running = true } } }
+                            onClicked: { panel.announce("Refreshing desktop status…"); panel.executable("rice-update-check"); if (panel.hasBattery) profileRead.running = true; brightnessRead.running = true; nightModeRead.running = true } } }
                     Text { text: "×"; color: closeArea.containsMouse ? "#ffffff" : "#b5b5b5"; font.pixelSize: 20;
                         width: 32; horizontalAlignment: Text.AlignHCenter
                         MouseArea { id: closeArea; anchors.fill: parent; hoverEnabled: true;
@@ -400,7 +432,7 @@ PopupWindow {
                             }
                         }
                         Item { width: 1; height: 7 }
-                        SectionTitle { visible: panel.brightnessAvailable || panel.hasBattery; text: "DISPLAY & POWER" }
+                        SectionTitle { visible: panel.brightnessAvailable || panel.hasBattery || panel.nightModeAvailable; text: "DISPLAY & POWER" }
                         Rectangle {
                             visible: panel.brightnessAvailable
                             width: parent.width; height: 82; radius: 10; color: "#252729"
@@ -427,6 +459,52 @@ PopupWindow {
                                     x: brightnessSlider.leftPadding + brightnessSlider.visualPosition * (brightnessSlider.availableWidth - width)
                                     y: brightnessSlider.topPadding + brightnessSlider.availableHeight / 2 - height / 2
                                     width: 15; height: 15; radius: 8; color: brightnessSlider.pressed ? "#ffffff" : "#f6f6f6"
+                                }
+                            }
+                        }
+                        SourceRow {
+                            visible: panel.nightModeAvailable
+                            glyph: "󰖔"
+                            title: "Night mode"
+                            detail: "Reduce blue light"
+                            info: "Turn the blue light filter " + (panel.nightModeEnabled ? "off" : "on")
+                            enabled: panel.nightModeEnabled
+                            onToggled: value => {
+                                panel.nightModeEnabled = value
+                                panel.executable("rice-night-mode", [value ? "on" : "off"])
+                                nightModeRefresh.restart()
+                            }
+                        }
+                        Rectangle {
+                            visible: panel.nightModeAvailable && panel.nightModeEnabled
+                            width: parent.width; height: 82; radius: 10; color: "#252729"
+                            Text { x: 12; y: 10; text: "Blue light reduction"; color: "#e9e9e9";
+                                font.family: "Adwaita Sans"; font.pixelSize: 12 }
+                            Text { anchors.right: parent.right; anchors.rightMargin: 12; y: 10;
+                                text: panel.nightModeStrength + "%"; color: "#c7c7c7";
+                                font.family: "Adwaita Sans"; font.pixelSize: 12 }
+                            Controls.Slider {
+                                id: nightModeSlider
+                                x: 10; y: 38; width: parent.width - 20; height: 34
+                                from: 0; to: 100; value: panel.nightModeStrength
+                                hoverEnabled: true
+                                onHoveredChanged: panel.hoverInfo = hovered ? "Adjust blue light reduction" : ""
+                                onMoved: {
+                                    panel.nightModeStrength = Math.round(value)
+                                    panel.announce("Blue light reduction " + panel.nightModeStrength + "%")
+                                    nightModeCommit.restart()
+                                }
+                                background: Rectangle {
+                                    x: nightModeSlider.leftPadding
+                                    y: nightModeSlider.topPadding + nightModeSlider.availableHeight / 2 - height / 2
+                                    width: nightModeSlider.availableWidth; height: 4; radius: 2; color: "#5a5c5d"
+                                    Rectangle { width: nightModeSlider.visualPosition * parent.width; height: parent.height;
+                                        radius: parent.radius; color: "#ededed" }
+                                }
+                                handle: Rectangle {
+                                    x: nightModeSlider.leftPadding + nightModeSlider.visualPosition * (nightModeSlider.availableWidth - width)
+                                    y: nightModeSlider.topPadding + nightModeSlider.availableHeight / 2 - height / 2
+                                    width: 15; height: 15; radius: 8; color: nightModeSlider.pressed ? "#ffffff" : "#f6f6f6"
                                 }
                             }
                         }

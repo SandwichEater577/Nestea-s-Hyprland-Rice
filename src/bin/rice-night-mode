@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state=${XDG_CONFIG_HOME:-$HOME/.config}/rice/night-mode
+enabled=off
+strength=50
+if [[ -r $state ]]; then
+    read -r saved_enabled saved_strength < "$state" || true
+    if [[ $saved_enabled == on || $saved_enabled == off ]]; then enabled=$saved_enabled; fi
+    if [[ $saved_strength =~ ^[0-9]+$ ]] && ((saved_strength >= 0 && saved_strength <= 100)); then strength=$saved_strength; fi
+fi
+
+case ${1:-} in
+    status) printf '%s %s\n' "$enabled" "$strength"; exit 0 ;;
+    on) enabled=on ;;
+    off) enabled=off ;;
+    strength)
+        [[ ${2:-} =~ ^[0-9]+$ ]] && (( 10#$2 <= 100 )) || { echo 'strength must be 0..100' >&2; exit 2; }
+        strength=$2
+        ;;
+    restore) [[ $enabled == on ]] || exit 0 ;;
+    *) echo 'usage: rice-night-mode {status|on|off|strength 0..100|restore}' >&2; exit 2 ;;
+esac
+
+command -v hyprsunset >/dev/null || { echo 'hyprsunset is required' >&2; exit 1; }
+command -v hyprctl >/dev/null || { echo 'hyprctl is required' >&2; exit 1; }
+if ! pgrep -u "$(id -u)" -x hyprsunset >/dev/null; then
+    hyprsunset --temperature 6500 >/dev/null 2>&1 &
+fi
+
+# A running instance accepts changes through Hyprland IPC. Its socket can take
+# a moment to appear after launch.
+temperature=$((6500 - strength * 40))
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if [[ $enabled == on ]]; then
+        result=$(hyprctl hyprsunset temperature "$temperature" 2>&1) || result=''
+    else
+        result=$(hyprctl hyprsunset identity 2>&1) || result=''
+    fi
+    if [[ $result == ok ]]; then break; fi
+    sleep 0.1
+done
+[[ $result == ok ]] || { echo 'Could not apply night mode' >&2; exit 1; }
+
+if [[ ${1:-} != restore ]]; then
+    mkdir -p "${state%/*}"
+    tmp=$(mktemp "${state}.XXXXXXXX")
+    chmod 600 "$tmp"
+    printf '%s %s\n' "$enabled" "$strength" > "$tmp"
+    mv -f -- "$tmp" "$state"
+fi
